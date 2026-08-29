@@ -81,5 +81,3 @@ class RolePermissionSeeder extends Seeder
         $this->command->info('Rôles et permissions synchronisés selon la matrice validée.');
     }
 }
-
->

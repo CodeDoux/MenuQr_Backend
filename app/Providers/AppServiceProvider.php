@@ -18,6 +18,7 @@ use App\Models\QRCode;
 use App\Models\Salle;
 use App\Models\TableRestaurant;
 use App\Models\ZoneLivraison;
+use App\Policies\AbonnementPolicy;
 use App\Policies\CategoriePolicy;
 use App\Policies\CommandePolicy;
 use App\Policies\EmployePolicy;
@@ -64,5 +65,6 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(MoyenPaiement::class, MoyenPaiementPolicy::class);
         Gate::policy(Promotion::class, PromotionPolicy::class);
         Gate::policy(JournalActivite::class, JournalActivitePolicy::class);
+        Gate::policy(\App\Models\Abonnement::class, AbonnementPolicy::class);
     }
 }

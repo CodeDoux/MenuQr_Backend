@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\StatutPlan;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Offre extends Model
@@ -34,5 +35,15 @@ class Offre extends Model
     public function abonnements(): HasMany
     {
         return $this->hasMany(Abonnement::class);
+    }
+
+    public function fonctionnalites(): BelongsToMany
+    {
+        return $this->belongsToMany(Fonctionnalite::class, 'offre_fonctionnalite');
+    }
+
+    public function limites(): HasMany
+    {
+        return $this->hasMany(LimitePlan::class);
     }
 }

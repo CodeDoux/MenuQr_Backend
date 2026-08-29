@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
          $middleware->alias([
             'restaurant.access' => EnsureRestaurantAccess::class,
+            'admin' => \App\Http\Middleware\EnsureIsAdmin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

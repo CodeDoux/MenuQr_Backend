@@ -29,6 +29,11 @@ class Restaurant extends Model
         ];
     }
 
+    public function abonnements(): HasMany
+{
+    return $this->hasMany(Abonnement::class);
+}
+
     public function restaurantUtilisateurs(): HasMany
     {
         return $this->hasMany(RestaurantUtilisateur::class);
