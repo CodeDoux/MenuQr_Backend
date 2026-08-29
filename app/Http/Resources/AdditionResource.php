@@ -25,4 +25,3 @@ class AdditionResource extends JsonResource
         ];
     }
 }
->

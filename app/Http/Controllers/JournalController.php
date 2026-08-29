@@ -17,4 +17,3 @@ class JournalController extends Controller
         );
     }
 }
->

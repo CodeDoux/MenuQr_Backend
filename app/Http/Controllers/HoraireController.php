@@ -26,4 +26,3 @@ class HoraireController extends Controller
         return new HoraireResource($horaire);
     }
 }
->

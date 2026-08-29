@@ -20,4 +20,3 @@ class LigneCommandeResource extends JsonResource
         ];
     }
 }
->

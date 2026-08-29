@@ -14,4 +14,3 @@ class JournalActiviteResource extends JsonResource
         ];
     }
 }
->

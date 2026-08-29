@@ -6,4 +6,3 @@ enum StatutAddition: string {
     case PAYEE = 'PAYEE';
     case ANNULEE = 'ANNULEE';
 }
->

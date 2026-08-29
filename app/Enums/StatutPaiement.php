@@ -7,4 +7,3 @@ enum StatutPaiement: string {
     case REMBOURSE = 'REMBOURSE';
     case ANNULE = 'ANNULE';
 }
->

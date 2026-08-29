@@ -130,4 +130,3 @@ Route::middleware(['auth:sanctum', 'restaurant.access'])->group(function () {
     Route::get('/journal', [JournalController::class, 'index']);
 });
 
->

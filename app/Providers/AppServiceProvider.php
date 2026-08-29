@@ -66,5 +66,3 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(JournalActivite::class, JournalActivitePolicy::class);
     }
 }
-
->

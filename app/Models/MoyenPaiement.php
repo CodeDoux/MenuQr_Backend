@@ -12,6 +12,8 @@ class MoyenPaiement extends Model
 {
     use HasUuids, BelongsToRestaurant;
 
+    protected $table = 'moyens_paiement';
+
     public $timestamps = false;
 
     protected $fillable = ['restaurant_id', 'methode', 'est_actif', 'identifiant_marchand'];

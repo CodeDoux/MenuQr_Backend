@@ -12,4 +12,3 @@ class MoyenPaiementResource extends JsonResource
         ];
     }
 }
->

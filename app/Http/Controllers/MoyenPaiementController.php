@@ -24,4 +24,3 @@ class MoyenPaiementController extends Controller
         return new MoyenPaiementResource($moyen);
     }
 }
->

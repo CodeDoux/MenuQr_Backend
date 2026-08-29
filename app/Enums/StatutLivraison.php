@@ -8,4 +8,3 @@ enum StatutLivraison: string {
     case LIVREE = 'LIVREE';
     case ANNULEE = 'ANNULEE';
 }
->

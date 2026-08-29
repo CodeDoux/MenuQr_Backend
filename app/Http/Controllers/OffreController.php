@@ -19,4 +19,3 @@ class OffreController extends Controller
         return OffreResource::collection($offres);
     }
 }
->

@@ -14,4 +14,3 @@ class FactureAbonnement extends Model
 
     public function abonnement(): BelongsTo { return $this->belongsTo(Abonnement::class); }
 }
->
