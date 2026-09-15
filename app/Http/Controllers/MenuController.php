@@ -6,18 +6,22 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\MenuRequest;
 use App\Http\Resources\MenuResource;
 use App\Models\Menu;
+use App\Services\MenuPublicCacheService;
+use App\Services\TenantContext;
 use Illuminate\Support\Facades\Gate;
 
 /**
  * ⚠️ Utilise volontairement des IDs bruts (string) plutôt que le route model
  * binding implicite de Laravel : ce dernier peut s'exécuter AVANT que le
- * middleware EnsureRestaurantAccess ait fini de définir le contexte tenant
- * (ordre d'exécution entre SubstituteBindings et un middleware custom non
- * garanti), ce qui ferait échouer RestaurantScope. La résolution manuelle
- * ici s'exécute dans le corps de la méthode, donc toujours après le middleware.
+ * middleware EnsureRestaurantAccess ait fini de définir le contexte tenant.
  */
 class MenuController extends Controller
 {
+    public function __construct(
+        private readonly TenantContext $tenant,
+        private readonly MenuPublicCacheService $cache
+    ) {}
+
     public function index()
     {
         Gate::authorize('viewAny', Menu::class);
@@ -33,6 +37,7 @@ class MenuController extends Controller
 
         $menu = Menu::create($request->validated());
 
+        $this->cache->invalider($this->tenant->restaurantId);
         return new MenuResource($menu);
     }
 
@@ -51,6 +56,7 @@ class MenuController extends Controller
 
         $menuModel->update($request->validated());
 
+        $this->cache->invalider($this->tenant->restaurantId);
         return new MenuResource($menuModel);
     }
 
@@ -61,6 +67,7 @@ class MenuController extends Controller
 
         $menuModel->delete();
 
+        $this->cache->invalider($this->tenant->restaurantId);
         return response()->json(null, 204);
     }
 }

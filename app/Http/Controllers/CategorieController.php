@@ -7,16 +7,17 @@ use App\Http\Requests\CategorieRequest;
 use App\Http\Resources\CategorieResource;
 use App\Models\Categorie;
 use App\Models\Menu;
+use App\Services\MenuPublicCacheService;
+use App\Services\TenantContext;
 use Illuminate\Support\Facades\Gate;
 
-/**
- * ⚠️ Resolution manuelle de Menu (voir MenuController pour le pourquoi).
- * Categorie est toujours accedee via $menu->categories() — jamais
- * Categorie::findOrFail() directement, puisqu'elle n'a pas de restaurant_id
- * propre a proteger (isolation transitive via son Menu parent, deja scope).
- */
 class CategorieController extends Controller
 {
+    public function __construct(
+        private readonly TenantContext $tenant,
+        private readonly MenuPublicCacheService $cache
+    ) {}
+
     public function index(string $menu)
     {
         $menuModel = Menu::findOrFail($menu);
@@ -34,6 +35,7 @@ class CategorieController extends Controller
 
         $categorie = $menuModel->categories()->create($request->validated());
 
+        $this->cache->invalider($this->tenant->restaurantId);
         return new CategorieResource($categorie);
     }
 
@@ -45,6 +47,8 @@ class CategorieController extends Controller
 
         $categorie->update($request->validated());
 
+        $this->cache->invalider($this->tenant->restaurantId);
+
         return new CategorieResource($categorie);
     }
 
@@ -55,6 +59,8 @@ class CategorieController extends Controller
         Gate::authorize('delete', $categorie);
 
         $categorie->delete();
+
+        $this->cache->invalider($this->tenant->restaurantId);
 
         return response()->json(null, 204);
     }

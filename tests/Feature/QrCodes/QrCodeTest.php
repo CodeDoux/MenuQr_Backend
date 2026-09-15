@@ -88,6 +88,7 @@ test('un restaurant ne peut pas désactiver le QR code d\'un autre restaurant', 
     $this->withHeader('Authorization', "Bearer {$tokenB}")
         ->postJson("/api/salles/{$salleB->id}/tables/{$tableB->id}/qrcode")->assertCreated();
     $qrCodeB = QRCode::where('table_id', $tableB->id)->where('est_actif', true)->first();
+        \Illuminate\Support\Facades\Auth::forgetGuards();
 
     $reponse = $this->withHeader('Authorization', "Bearer {$tokenA}")
         ->patchJson("/api/qrcodes/{$qrCodeB->id}/desactiver");

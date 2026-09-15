@@ -6,10 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\HoraireRequest;
 use App\Http\Resources\HoraireResource;
 use App\Models\Horaire;
+use App\Services\MenuPublicCacheService;
+use App\Services\TenantContext;
 use Illuminate\Support\Facades\Gate;
 
 class HoraireController extends Controller
 {
+    public function __construct(
+        private readonly TenantContext $tenant,
+        private readonly MenuPublicCacheService $cache
+    ) {}
+
     public function index()
     {
         Gate::authorize('viewAny', Horaire::class);
@@ -23,6 +30,7 @@ class HoraireController extends Controller
         $horaire = Horaire::findOrFail($id);
         Gate::authorize('update', $horaire);
         $horaire->update($request->validated());
+        $this->cache->invalider($this->tenant->restaurantId);
         return new HoraireResource($horaire);
     }
 }

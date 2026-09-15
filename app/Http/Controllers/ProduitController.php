@@ -9,14 +9,18 @@ use App\Http\Resources\ProduitResource;
 use App\Models\Notification;
 use App\Models\Produit;
 use App\Models\RestaurantUtilisateur;
+use App\Services\MenuPublicCacheService;
+use App\Services\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
-/**
- * ⚠️ Resolution manuelle de Produit (voir MenuController pour le pourquoi).
- */
 class ProduitController extends Controller
 {
+    public function __construct(
+        private readonly TenantContext $tenant,
+        private readonly MenuPublicCacheService $cache
+    ) {}
+
     public function index()
     {
         Gate::authorize('viewAny', Produit::class);
@@ -32,9 +36,6 @@ class ProduitController extends Controller
             $query->whereHas('categories', fn ($q) => $q->where('categories.id', $categorieId));
         }
 
-        // ⚠️ Pagination opt-in uniquement : le sélecteur de produits du
-        // formulaire Promotion (et tout autre usage futur ayant besoin de
-        // TOUS les produits) appelle cet endpoint sans page/per_page.
         if (request()->has('page') || request()->has('per_page')) {
             return ProduitResource::collection($query->paginate(request()->integer('per_page', 24)));
         }
@@ -73,6 +74,7 @@ class ProduitController extends Controller
             return $produit;
         });
 
+        $this->cache->invalider($this->tenant->restaurantId);
         return new ProduitResource($produit->load(['categories', 'variantes', 'images']));
     }
 
@@ -116,11 +118,11 @@ class ProduitController extends Controller
             }
         });
 
-        // Notifie uniquement lors du passage disponible -> rupture (pas au retour en stock).
         if ($etaitDisponible && ! $produitModel->est_disponible) {
             $this->notifierRupture($produitModel);
         }
 
+        $this->cache->invalider($this->tenant->restaurantId);
         return new ProduitResource($produitModel->load(['categories', 'variantes', 'images']));
     }
 
@@ -131,14 +133,10 @@ class ProduitController extends Controller
 
         $produitModel->update(['statut' => StatutProduit::ARCHIVE]);
 
+        $this->cache->invalider($this->tenant->restaurantId);
         return response()->json(null, 204);
     }
 
-    /**
-     * ⚠️ Route jamais créée jusqu'ici — le bouton de bascule rapide du
-     * frontend n'appelait aucun endpoint existant. Notifie Propriétaire et
-     * Gérant uniquement quand le produit PASSE en rupture (pas au retour en stock).
-     */
     public function basculerDisponibilite(string $produit)
     {
         $produitModel = Produit::findOrFail($produit);
@@ -151,6 +149,7 @@ class ProduitController extends Controller
             $this->notifierRupture($produitModel);
         }
 
+        $this->cache->invalider($this->tenant->restaurantId);
         return new ProduitResource($produitModel->load(['categories', 'variantes', 'images']));
     }
 

@@ -6,11 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\RestaurantInfosRequest;
 use App\Http\Resources\RestaurantInfosResource;
 use App\Models\Restaurant;
+use App\Services\MenuPublicCacheService;
 use App\Services\TenantContext;
 
 class RestaurantController extends Controller
 {
-    public function __construct(private readonly TenantContext $tenant) {}
+    public function __construct(
+        private readonly TenantContext $tenant,
+        private readonly MenuPublicCacheService $cache
+    ) {}
 
     public function show()
     {
@@ -27,6 +31,8 @@ class RestaurantController extends Controller
 
         $restaurant = Restaurant::findOrFail($this->tenant->restaurantId);
         $restaurant->update($request->validated());
+
+        $this->cache->invalider($this->tenant->restaurantId);
 
         return new RestaurantInfosResource($restaurant);
     }
