@@ -46,19 +46,47 @@ class PublicMenuController extends Controller
             ->get();
 
         $table = $qrCode->table_id
-            ? TableRestaurant::find($qrCode->table_id)
-            : null;
+        ? \App\Models\TableRestaurant::withoutGlobalScope(RestaurantScope::class)
+            ->with(['salle' => fn ($q) => $q->withoutGlobalScope(RestaurantScope::class)])
+            ->find($qrCode->table_id)
+        : null;
+
+        $restaurant = \App\Models\Restaurant::withoutGlobalScope(RestaurantScope::class)->find($qrCode->restaurant_id);
 
         $zones = \App\Models\ZoneLivraison::withoutGlobalScope(RestaurantScope::class)
             ->where('restaurant_id', $qrCode->restaurant_id)
             ->where('statut', 'ACTIVE')
             ->get();
 
+        $horaires = \App\Models\Horaire::withoutGlobalScope(RestaurantScope::class)
+            ->where('restaurant_id', $qrCode->restaurant_id)
+            ->orderByRaw("array_position(ARRAY['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI','DIMANCHE'], jour_semaine)")
+            ->get()
+            ->map(fn ($h) => [
+                'jour' => $h->jour_semaine,
+                'ouverture' => $h->heure_ouverture,
+                'fermeture' => $h->heure_fermeture,
+                'ferme' => $h->est_ferme,
+            ]);
+
+        $moyensPaiement = \App\Models\MoyenPaiement::withoutGlobalScope(RestaurantScope::class)
+            ->where('restaurant_id', $qrCode->restaurant_id)
+            ->where('est_actif', true)
+            ->get()
+            ->pluck('methode');
+
         return response()->json([
             'restaurant_id' => $qrCode->restaurant_id,
+            'restaurant_nom' => $restaurant?->nom,
+            'restaurant_adresse' => $restaurant?->adresse,
+            'restaurant_telephone' => $restaurant?->telephone,
+            'restaurant_description' => $restaurant?->description,
+            'horaires' => $horaires,
+            'moyens_paiement' => $moyensPaiement,
             'type_qr' => $qrCode->type,
             'table_id' => $table?->id,
             'table_numero' => $table?->numero,
+            'salle_nom' => $table?->salle?->description,
             'menus' => MenuResource::collection($menus),
             'produits' => ProduitResource::collection($produits),
             'zones_livraison' => \App\Http\Resources\ZoneLivraisonResource::collection($zones),

@@ -49,6 +49,7 @@ class RolePermissionSeeder extends Seeder
         'GERANT' => [
             'menu.creer', 'menu.modifier',
             'commande.voir', 'commande.gerer_statut', 'commande.annuler',
+            'paiement.effectuer',
             'table.gerer', 'livraison.gerer', 'employe.gerer',
             'promotion.gerer', 'facture.consulter', 'statistique.consulter',
         ],

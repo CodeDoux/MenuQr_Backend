@@ -12,13 +12,17 @@ use Illuminate\Support\Facades\Gate;
 class SalleController extends Controller
 {
     public function index()
-    {
-        Gate::authorize('viewAny', Salle::class);
+{
+    Gate::authorize('viewAny', Salle::class);
 
-        $salles = Salle::withCount('tables')->orderBy('ordre')->get();
+    $salles = Salle::withCount('tables')->orderBy('ordre')->get();
 
-        return SalleResource::collection($salles);
-    }
+    \Log::info('Salles renvoyées', [
+        'restaurant_ids_trouves' => $salles->pluck('restaurant_id')->unique()->values(),
+    ]);
+
+    return SalleResource::collection($salles);
+}
 
     public function store(SalleRequest $request)
     {

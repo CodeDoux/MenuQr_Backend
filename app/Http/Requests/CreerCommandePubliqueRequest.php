@@ -23,9 +23,11 @@ class CreerCommandePubliqueRequest extends FormRequest
             'items.*.notes' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
 
-            // Requis uniquement si mode = LIVRAISON
-            'nom_client' => ['required_if:mode,LIVRAISON', 'nullable', 'string', 'max:255'],
-            'telephone_client' => ['required_if:mode,LIVRAISON', 'nullable', 'string', 'max:30'],
+            // Requis pour LIVRAISON (déjà existant) ET pour EMPORTER (nouveau —
+            // le staff doit savoir qui vient récupérer la commande).
+            'nom_client' => ['required_if:mode,LIVRAISON', 'required_if:mode,EMPORTER', 'nullable', 'string', 'max:255'],
+            'telephone_client' => ['required_if:mode,LIVRAISON', 'required_if:mode,EMPORTER', 'nullable', 'string', 'max:30'],
+            'heure_retrait_souhaitee' => ['nullable', 'date_format:H:i'],
             'adresse_complete' => ['required_if:mode,LIVRAISON', 'nullable', 'string', 'max:500'],
             'quartier' => ['nullable', 'string', 'max:255'],
             'indications' => ['nullable', 'string'],
@@ -33,4 +35,3 @@ class CreerCommandePubliqueRequest extends FormRequest
         ];
     }
 }
->

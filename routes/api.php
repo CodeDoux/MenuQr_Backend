@@ -26,35 +26,42 @@ use App\Http\Controllers\QrCodeController;
 use App\Http\Controllers\SalleController;
 use App\Http\Controllers\TableController;
 use App\Http\Controllers\UploadController;
+use App\Http\Controllers\RestaurantController;
 use App\Http\Controllers\ZoneLivraisonController;
+use App\Http\Controllers\NotificationController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\StatistiquesController;
 
 // --- Public ---
-Route::get('/offres', [OffreController::class, 'index']);
+Route::get('/offres', [OffreController::class, 'index'])->middleware('throttle:60,1');
 
-Route::post('/auth/register', [AuthController::class, 'register']);
+Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:6,1');
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:6,1');
+Route::post('/auth/mot-de-passe-oublie', [AuthController::class, 'motDePasseOublie'])->middleware('throttle:6,1');
+Route::post('/auth/reinitialiser-mot-de-passe', [AuthController::class, 'reinitialiserMotDePasse'])->middleware('throttle:6,1');
 
-Route::get('/invitations/{employeId}', [InvitationController::class, 'show']);
+Route::get('/invitations/{employeId}', [InvitationController::class, 'show'])->middleware('throttle:30,1');
 Route::post('/invitations/{employeId}/accepter', [InvitationController::class, 'accepter'])->middleware('throttle:6,1');
 
 // --- Zone client publique (menu numérique + commande) ---
 Route::prefix('public')->group(function () {
-    Route::get('/menu', [PublicMenuController::class, 'show']);
+    Route::get('/menu', [PublicMenuController::class, 'show'])->middleware('throttle:60,1');
     Route::post('/commandes', [PublicCommandeController::class, 'store'])->middleware('throttle:20,1');
-    Route::get('/commandes/{id}', [PublicCommandeController::class, 'show']);
-    Route::get('/commandes/{id}/visite', [PublicCommandeController::class, 'commandesDeLaVisite']);
+    Route::get('/commandes/{id}', [PublicCommandeController::class, 'show'])->middleware('throttle:60,1');
+    Route::get('/commandes/{id}/visite', [PublicCommandeController::class, 'commandesDeLaVisite'])->middleware('throttle:60,1');
     Route::post('/commandes/{id}/payer', [PublicCommandeController::class, 'payer'])->middleware('throttle:10,1');
 });
 
 // --- Authentifié, sans contexte restaurant encore résolu ---
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'throttle:30,1'])->group(function () {
     Route::post('/auth/select-restaurant', [AuthController::class, 'selectRestaurant']);
 });
 
 // --- Authentifié + contexte restaurant actif requis ---
-Route::middleware(['auth:sanctum', 'restaurant.access'])->group(function () {
+Route::middleware(['auth:sanctum', 'restaurant.access', 'throttle:120,1'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::put('/auth/mot-de-passe', [AuthController::class, 'changerMotDePasse']);
+    Route::put('/auth/profil', [AuthController::class, 'modifierProfil']);
 
     Route::apiResource('menus', MenuController::class)->except(['destroy']);
     Route::delete('/menus/{menu}', [MenuController::class, 'destroy']);
@@ -66,6 +73,7 @@ Route::middleware(['auth:sanctum', 'restaurant.access'])->group(function () {
 
     Route::apiResource('produits', ProduitController::class)->except(['destroy']);
     Route::patch('/produits/{produit}/archiver', [ProduitController::class, 'archiver']);
+    Route::patch('/produits/{id}/disponibilite', [ProduitController::class, 'basculerDisponibilite']);
 
     Route::post('/uploads/images', [UploadController::class, 'uploadImage']);
 
@@ -78,6 +86,7 @@ Route::middleware(['auth:sanctum', 'restaurant.access'])->group(function () {
     Route::post('/salles/{salle}/tables', [TableController::class, 'store']);
     Route::put('/salles/{salle}/tables/{tableId}', [TableController::class, 'update']);
     Route::delete('/salles/{salle}/tables/{tableId}', [TableController::class, 'destroy']);
+    Route::patch('/salles/{salle}/tables/{tableId}/liberer', [TableController::class, 'liberer']);
 
     Route::post('/salles/{salle}/tables/{tableId}/qrcode', [QrCodeController::class, 'genererPourTable']);
     Route::post('/qrcodes/generales', [QrCodeController::class, 'genererGeneral']);
@@ -102,6 +111,7 @@ Route::middleware(['auth:sanctum', 'restaurant.access'])->group(function () {
     Route::patch('/commandes/{id}/annuler', [CommandeController::class, 'annuler']);
 
     Route::get('/additions', [PaiementController::class, 'additionsOuvertes']);
+    Route::get('/additions/{id}', [PaiementController::class, 'addition']);
     Route::post('/additions/{id}/encaisser', [PaiementController::class, 'encaisserAddition']);
     Route::post('/commandes/{id}/encaisser-direct', [PaiementController::class, 'encaisserCommandeDirecte']);
 
@@ -139,6 +149,16 @@ Route::middleware(['auth:sanctum', 'restaurant.access'])->group(function () {
     Route::patch('/abonnement/annuler', [AbonnementController::class, 'annuler']);
     Route::patch('/abonnement/reactiver', [AbonnementController::class, 'reactiver']);
     Route::get('/factures-abonnement', [AbonnementController::class, 'factures']);
+
+    Route::get('/statistiques/dashboard', [StatistiquesController::class, 'dashboard']);
+    Route::get('/statistiques/detaillees', [StatistiquesController::class, 'detaillees']);
+
+    Route::get('/restaurant', [RestaurantController::class, 'show']);
+    Route::put('/restaurant', [RestaurantController::class, 'update']);
+
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::patch('/notifications/{id}/lue', [NotificationController::class, 'marquerLue']);
+    Route::patch('/notifications/tout-marquer-lu', [NotificationController::class, 'toutMarquerLu']);
 });
 
 // ============================================================
@@ -147,7 +167,7 @@ Route::middleware(['auth:sanctum', 'restaurant.access'])->group(function () {
 // ============================================================
 Route::post('/admin/login', [AdminAuthController::class, 'login'])->middleware('throttle:6,1');
 
-Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function () {
+Route::middleware(['auth:sanctum', 'admin', 'throttle:120,1'])->prefix('admin')->group(function () {
     Route::post('/logout', [AdminAuthController::class, 'logout']);
 
     Route::get('/restaurants', [AdminRestaurantController::class, 'index']);

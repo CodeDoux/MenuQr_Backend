@@ -6,7 +6,9 @@ use App\Enums\StatutProduit;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ProduitRequest;
 use App\Http\Resources\ProduitResource;
+use App\Models\Notification;
 use App\Models\Produit;
+use App\Models\RestaurantUtilisateur;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
@@ -19,11 +21,25 @@ class ProduitController extends Controller
     {
         Gate::authorize('viewAny', Produit::class);
 
-        $produits = Produit::where('statut', StatutProduit::ACTIF)
-            ->with(['categories', 'variantes', 'images'])
-            ->get();
+        $query = Produit::where('statut', StatutProduit::ACTIF)
+            ->with(['categories', 'variantes', 'images']);
 
-        return ProduitResource::collection($produits);
+        if ($recherche = request()->query('recherche')) {
+            $query->where('nom', 'ILIKE', "%{$recherche}%");
+        }
+
+        if ($categorieId = request()->query('categorie_id')) {
+            $query->whereHas('categories', fn ($q) => $q->where('categories.id', $categorieId));
+        }
+
+        // ⚠️ Pagination opt-in uniquement : le sélecteur de produits du
+        // formulaire Promotion (et tout autre usage futur ayant besoin de
+        // TOUS les produits) appelle cet endpoint sans page/per_page.
+        if (request()->has('page') || request()->has('per_page')) {
+            return ProduitResource::collection($query->paginate(request()->integer('per_page', 24)));
+        }
+
+        return ProduitResource::collection($query->get());
     }
 
     public function store(ProduitRequest $request)
@@ -74,6 +90,7 @@ class ProduitController extends Controller
         Gate::authorize('update', $produitModel);
 
         $data = $request->validated();
+        $etaitDisponible = $produitModel->est_disponible;
 
         DB::transaction(function () use ($produitModel, $data) {
             $produitModel->update([
@@ -99,6 +116,11 @@ class ProduitController extends Controller
             }
         });
 
+        // Notifie uniquement lors du passage disponible -> rupture (pas au retour en stock).
+        if ($etaitDisponible && ! $produitModel->est_disponible) {
+            $this->notifierRupture($produitModel);
+        }
+
         return new ProduitResource($produitModel->load(['categories', 'variantes', 'images']));
     }
 
@@ -110,5 +132,45 @@ class ProduitController extends Controller
         $produitModel->update(['statut' => StatutProduit::ARCHIVE]);
 
         return response()->json(null, 204);
+    }
+
+    /**
+     * ⚠️ Route jamais créée jusqu'ici — le bouton de bascule rapide du
+     * frontend n'appelait aucun endpoint existant. Notifie Propriétaire et
+     * Gérant uniquement quand le produit PASSE en rupture (pas au retour en stock).
+     */
+    public function basculerDisponibilite(string $produit)
+    {
+        $produitModel = Produit::findOrFail($produit);
+        Gate::authorize('update', $produitModel);
+
+        $nouvelleDisponibilite = ! $produitModel->est_disponible;
+        $produitModel->update(['est_disponible' => $nouvelleDisponibilite]);
+
+        if (! $nouvelleDisponibilite) {
+            $this->notifierRupture($produitModel);
+        }
+
+        return new ProduitResource($produitModel->load(['categories', 'variantes', 'images']));
+    }
+
+    private function notifierRupture(Produit $produitModel): void
+    {
+        $managers = RestaurantUtilisateur::where('restaurant_id', $produitModel->restaurant_id)
+            ->where('statut', 'ACTIF')
+            ->whereHas('role', fn ($q) => $q->whereIn('code', ['PROPRIETAIRE', 'GERANT']))
+            ->get();
+
+        foreach ($managers as $acces) {
+            Notification::create([
+                'utilisateur_id' => $acces->utilisateur_id,
+                'titre' => 'Rupture de stock',
+                'message' => "Le produit \"{$produitModel->nom}\" est marqué en rupture",
+                'type' => 'STOCK_RUPTURE',
+                'lien' => '/produits',
+                'est_lu' => false,
+                'date_envoie' => now(),
+            ]);
+        }
     }
 }

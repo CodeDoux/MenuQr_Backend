@@ -17,11 +17,24 @@ class LivraisonController extends Controller
         StatutLivraison::EN_ROUTE, StatutLivraison::LIVREE,
     ];
 
+    /**
+     * ⚠️ Livraison n'a pas de restaurant_id propre — elle s'identifie via
+     * commande_id. whereHas('commande') applique automatiquement le
+     * RestaurantScope déjà en place sur Commande dans sa sous-requête,
+     * sans avoir besoin de connaître explicitement le restaurant courant.
+     */
+    private function scopeAuTenant($query)
+    {
+        return $query->whereHas('commande');
+    }
+
     public function index()
     {
         Gate::authorize('voir', Livraison::class);
 
-        $query = Livraison::with(['commande', 'adresse', 'livreurEmploye.utilisateur', 'zoneLivraison']);
+        $query = $this->scopeAuTenant(
+            Livraison::with(['commande', 'adresse', 'livreurEmploye.utilisateur', 'zoneLivraison'])
+        );
 
         if ($statut = request()->query('statut')) {
             $query->where('statut', $statut);
@@ -32,7 +45,7 @@ class LivraisonController extends Controller
 
     public function affecter(AffecterLivreurRequest $request, string $id)
     {
-        $livraison = Livraison::findOrFail($id);
+        $livraison = $this->scopeAuTenant(Livraison::query())->findOrFail($id);
         Gate::authorize('gerer', $livraison);
 
         $data = $request->validated();
@@ -53,7 +66,7 @@ class LivraisonController extends Controller
     /** Fait avancer la livraison d'une étape ; ferme la boucle avec Commande à l'arrivée sur LIVREE. */
     public function avancerStatut(string $id)
     {
-        $livraison = Livraison::with('commande')->findOrFail($id);
+        $livraison = $this->scopeAuTenant(Livraison::query())->with('commande')->findOrFail($id);
         Gate::authorize('gerer', $livraison);
 
         $index = array_search($livraison->statut, self::ORDRE_ETAPES, true);
@@ -77,7 +90,7 @@ class LivraisonController extends Controller
 
     public function annuler(string $id)
     {
-        $livraison = Livraison::with('commande')->findOrFail($id);
+        $livraison = $this->scopeAuTenant(Livraison::query())->with('commande')->findOrFail($id);
         Gate::authorize('gerer', $livraison);
 
         $livraison->update(['statut' => StatutLivraison::ANNULEE]);

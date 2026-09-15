@@ -19,6 +19,10 @@ use SimpleSoftwareIO\QrCode\Facades\QrCode as QrCodeGenerator;
  * côté client) : permet de stocker une vraie image persistée et de
  * suivre nombre_scan de façon fiable. FRONTEND_URL (.env) nécessaire
  * car le backend ne connaît pas l'origine du frontend automatiquement.
+ *
+ * ⚠️ QRCode n'a pas de scope automatique (BelongsToRestaurant) — chaque
+ * méthode doit filtrer explicitement par restaurant_id. index() et
+ * desactiver() ne le faisaient pas (fuite corrigée).
  */
 class QrCodeController extends Controller
 {
@@ -61,14 +65,17 @@ class QrCodeController extends Controller
     {
         Gate::authorize('viewAny', QRCode::class);
 
-        $qrCodes = QRCode::where('est_actif', true)->get();
+        $qrCodes = QRCode::where('restaurant_id', $this->tenant->restaurantId)
+            ->where('est_actif', true)
+            ->get();
 
         return QrCodeResource::collection($qrCodes);
     }
 
     public function desactiver(string $id)
     {
-        $qrCode = QRCode::findOrFail($id);
+        
+        $qrCode = QRCode::where('restaurant_id', $this->tenant->restaurantId)->findOrFail($id);
         Gate::authorize('delete', $qrCode);
 
         $qrCode->update(['est_actif' => false]);
@@ -93,6 +100,7 @@ class QrCodeController extends Controller
         $imageUrl = Storage::disk('public')->url($chemin);
 
         return QRCode::create([
+            'restaurant_id' => $this->tenant->restaurantId,
             'table_id' => $tableId,
             'code' => $code,
             'url' => $url,

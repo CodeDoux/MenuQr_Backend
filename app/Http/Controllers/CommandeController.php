@@ -33,6 +33,14 @@ class CommandeController extends Controller
             $query->where('mode', $mode);
         }
 
+        // ⚠️ Pagination opt-in uniquement : Cuisine/Service/Caisse appellent
+        // cet endpoint SANS page/per_page et doivent continuer à recevoir
+        // TOUTES les commandes actives (tableau opérationnel temps réel).
+        // Seule la Vue globale, en passant ces paramètres, déclenche la pagination.
+        if (RequestFacade::has('page') || RequestFacade::has('per_page')) {
+            return CommandeResource::collection($query->paginate(RequestFacade::integer('per_page', 20)));
+        }
+
         return CommandeResource::collection($query->get());
     }
 

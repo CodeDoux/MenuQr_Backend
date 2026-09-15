@@ -22,8 +22,8 @@ class EnsureRestaurantAccess
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
-        $token = $user?->currentAccessToken();
-
+    $token = $user?->currentAccessToken();
+    
         if (! $user || ! $token || empty($token->restaurant_id)) {
             return response()->json([
                 'message' => 'Aucun restaurant actif pour ce token.',

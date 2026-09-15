@@ -51,4 +51,27 @@ class TableController extends Controller
 
         return response()->json(null, 204);
     }
+
+    /**
+     * Libération manuelle uniquement (décision actée) : le paiement peut
+     * arriver AVANT que les clients quittent physiquement la table — lier la
+     * libération au paiement afficherait "Libre" alors que la table est
+     * encore occupée. Le staff clôture donc explicitement.
+     */
+    public function liberer(string $salle, string $tableId)
+    {
+        $salleModel = Salle::findOrFail($salle);
+        $table = $salleModel->tables()->findOrFail($tableId);
+        Gate::authorize('update', $table);
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($table) {
+            $table->update(['statut' => 'LIBRE']);
+
+            \App\Models\Visite::where('table_id', $table->id)
+                ->where('statut', 'EN_COURS')
+                ->update(['statut' => 'TERMINEE', 'date_fin' => now()]);
+        });
+
+        return new TableResource($table->fresh());
+    }
 }

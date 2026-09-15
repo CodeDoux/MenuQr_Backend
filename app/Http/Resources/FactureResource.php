@@ -28,10 +28,10 @@ class FactureResource extends JsonResource
 
     private function resolveLignesPourImpression(): array
     {
-        if ($this->commande_id) {
+        if ($this->commande_id && $this->commande) {
             return LigneCommandeResource::collection($this->commande->lignes()->with('produit')->get())->toArray(request());
         }
-        if ($this->addition_id) {
+        if ($this->addition_id && $this->addition && $this->addition->visite) {
             $lignes = collect();
             foreach ($this->addition->visite->commandes as $commande) {
                 $lignes = $lignes->merge($commande->lignes()->with('produit')->get());

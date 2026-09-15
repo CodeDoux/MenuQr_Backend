@@ -23,20 +23,48 @@ class PaiementController extends Controller
 {
     public function __construct(private readonly JournalService $journal) {}
 
+    /**
+     * ⚠️ Paiement et Facture n'ont pas de restaurant_id propre (ils
+     * s'identifient via commande_id XOR addition_id). On restreint ici via
+     * whereHas(), qui applique automatiquement le RestaurantScope déjà en
+     * place sur Commande et Visite dans ses sous-requêtes — sans avoir besoin
+     * de connaître explicitement l'ID du restaurant courant.
+     */
+    private function scopeAuTenant($query)
+    {
+        return $query->where(function ($q) {
+            $q->whereHas('commande')
+              ->orWhereHas('addition', fn ($sub) => $sub->whereHas('visite'));
+        });
+    }
+
     public function additionsOuvertes()
     {
         Gate::authorize('voir', Commande::class);
 
-        $additions = Addition::where('statut', StatutAddition::OUVERTE)->with(['visite.table'])->get();
+        $additions = Addition::where('statut', StatutAddition::OUVERTE)
+            ->whereHas('visite')
+            ->with(['visite.table'])
+            ->get();
 
         return AdditionResource::collection($additions);
+    }
+
+    /** Affichage/impression de l'addition pour la montrer au client — avant encaissement. */
+    public function addition(string $id)
+    {
+        Gate::authorize('voir', Commande::class);
+
+        $addition = Addition::whereHas('visite')->with(['visite.table'])->findOrFail($id);
+
+        return new AdditionResource($addition);
     }
 
     public function encaisserAddition(EncaisserRequest $request, string $id)
     {
         Gate::authorize('encaisser', Commande::class);
 
-        $addition = Addition::findOrFail($id);
+        $addition = Addition::whereHas('visite')->findOrFail($id);
 
         $paiement = DB::transaction(function () use ($addition, $request) {
             $paiement = Paiement::create([
@@ -66,6 +94,8 @@ class PaiementController extends Controller
     {
         Gate::authorize('encaisser', Commande::class);
 
+        // Commande a déjà son propre restaurant_id + RestaurantScope — pas
+        // besoin de filtre supplémentaire ici, findOrFail est déjà tenant-safe.
         $commande = Commande::findOrFail($id);
 
         $paiement = DB::transaction(function () use ($commande, $request) {
@@ -94,14 +124,18 @@ class PaiementController extends Controller
     {
         Gate::authorize('consulterFactures', Commande::class);
 
-        return PaiementResource::collection(Paiement::orderByDesc('date_paiement')->get());
+        $paiements = $this->scopeAuTenant(Paiement::query())
+            ->orderByDesc('date_paiement')
+            ->get();
+
+        return PaiementResource::collection($paiements);
     }
 
     public function rembourser(string $id)
     {
         Gate::authorize('rembourser', Commande::class);
 
-        $paiement = Paiement::findOrFail($id);
+        $paiement = $this->scopeAuTenant(Paiement::query())->findOrFail($id);
         $ancienStatut = $paiement->statut;
         $paiement->update(['statut' => StatutPaiement::REMBOURSE]);
 
@@ -114,14 +148,20 @@ class PaiementController extends Controller
     {
         Gate::authorize('consulterFactures', Commande::class);
 
-        return FactureResource::collection(Facture::orderByDesc('date_emission')->get());
+        $factures = $this->scopeAuTenant(Facture::query())
+            ->orderByDesc('date_emission')
+            ->get();
+
+        return FactureResource::collection($factures);
     }
 
     public function facture(string $id)
     {
         Gate::authorize('consulterFactures', Commande::class);
 
-        $facture = Facture::with(['commande.lignes.produit', 'addition.visite.commandes.lignes.produit'])->findOrFail($id);
+        $facture = $this->scopeAuTenant(Facture::query())
+            ->with(['commande.lignes.produit', 'addition.visite.commandes.lignes.produit'])
+            ->findOrFail($id);
 
         return new FactureResource($facture);
     }

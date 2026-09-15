@@ -43,7 +43,7 @@ class InvitationController extends Controller
     public function accepter(AcceptInvitationRequest $request, string $employeId)
     {
         $employe = Employe::withoutGlobalScope(RestaurantScope::class)
-            ->with(['utilisateur', 'accesPlateforme', 'restaurant'])
+            ->with(['utilisateur', 'accesPlateforme.role.permissions', 'restaurant'])
             ->find($employeId);
 
         if (!$employe || !$employe->accesPlateforme || $employe->accesPlateforme->statut !== StatutAcces::INVITE) {
@@ -68,6 +68,8 @@ class InvitationController extends Controller
                 'email' => $employe->utilisateur->email,
             ],
             'restaurant' => ['id' => $employe->restaurant->id, 'nom' => $employe->restaurant->nom],
+            'role' => $employe->accesPlateforme->role->code,
+            'permissions' => $employe->accesPlateforme->role->permissions->pluck('code'),
         ]);
     }
 }

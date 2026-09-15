@@ -22,4 +22,3 @@ class CategorieRequest extends FormRequest
         ];
     }
 }
->

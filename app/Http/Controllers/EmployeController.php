@@ -25,7 +25,12 @@ class EmployeController extends Controller
 
     public function index()
     {
-        Gate::authorize('viewAny', Employe::class);
+        // ⚠️ Corrigé — la policy laissait n'importe quel rôle staff consulter
+        // la liste des employés. Seuls ceux ayant la permission de GÉRER les
+        // employés (Propriétaire/Gérant) doivent pouvoir la voir.
+        if (! $this->tenant->aLaPermission('employe.gerer')) {
+            abort(403);
+        }
 
         $employes = Employe::with(['utilisateur', 'poste', 'accesPlateforme.role'])->get();
 

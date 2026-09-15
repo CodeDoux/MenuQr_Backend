@@ -19,4 +19,3 @@ class AcceptInvitationRequest extends FormRequest
         ];
     }
 }
->

@@ -38,6 +38,9 @@ use App\Services\TenantContext;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -66,5 +69,30 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Promotion::class, PromotionPolicy::class);
         Gate::policy(JournalActivite::class, JournalActivitePolicy::class);
         Gate::policy(\App\Models\Abonnement::class, AbonnementPolicy::class);
+
+        // --- Routes publiques (menu/scan QR) — généreux mais protège contre
+        // le scraping/l'abus par IP, puisqu'aucune authentification n'existe.
+        RateLimiter::for('public', function (Request $request) {
+            return Limit::perMinute(30)->by($request->ip());
+        });
+
+        // --- Création de commande / paiement public — plus restrictif :
+        // empêche le spam de fausses commandes sur un restaurant.
+        RateLimiter::for('public-commande', function (Request $request) {
+            return Limit::perMinute(10)->by($request->ip());
+        });
+
+        // --- Authentification (login, inscription, mot de passe) —
+        // protection standard contre le brute-force.
+        RateLimiter::for('auth', function (Request $request) {
+            return Limit::perMinute(5)->by($request->ip());
+        });
+
+        // --- API authentifiée (staff + admin) — généreux pour un usage
+        // normal de l'interface, bloque un client buggé/compromis qui
+        // spammerait l'API.
+        RateLimiter::for('api', function (Request $request) {
+            return Limit::perMinute(120)->by($request->user()?->id ?: $request->ip());
+        });
     }
 }

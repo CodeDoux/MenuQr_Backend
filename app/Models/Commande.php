@@ -16,9 +16,10 @@ class Commande extends Model
     use HasUuids, BelongsToRestaurant;
 
     protected $fillable = [
-        'restaurant_id', 'client_id', 'visite_id', 'table_id', 'mode', 'statut',
-        'sous_total', 'frais_livraison', 'remise', 'total', 'notes',
-    ];
+    'restaurant_id', 'client_id', 'visite_id', 'addition_id', 'table_id', 'mode', 'statut',
+    'sous_total', 'frais_livraison', 'remise', 'total', 'notes',
+    'nom_client', 'telephone_client', 'heure_retrait_souhaitee',
+];
 
     protected function casts(): array
     {

@@ -18,4 +18,3 @@ class AffecterLivreurRequest extends FormRequest
         ];
     }
 }
->

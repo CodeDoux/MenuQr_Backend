@@ -23,7 +23,10 @@ class AdminAuthController extends Controller
             throw ValidationException::withMessages(['email' => ['Ce compte admin est désactivé.']]);
         }
 
-        $token = $admin->createToken('admin-auth');
+        // ⚠️ Expiration volontairement plus stricte que côté staff restaurant
+        // (12h) : un compte Admin contrôle toute la plateforme, pas un seul
+        // restaurant — le risque en cas de token oublié/volé est bien plus large.
+        $token = $admin->createToken('admin-auth', ['*'], now()->addHours(12));
 
         return response()->json([
             'token' => $token->plainTextToken,

@@ -19,7 +19,10 @@ class AdditionResource extends JsonResource
             'total' => $this->total,
             'statut' => $this->statut,
             'commandes' => CommandeResource::collection(
-                $this->whenLoaded('visite', fn () => $this->visite->commandes()->with('lignes.produit')->get())
+                \App\Models\Commande::withoutGlobalScope(\App\Models\Scopes\RestaurantScope::class)
+                    ->where('addition_id', $this->id)
+                    ->with('lignes.produit')
+                    ->get()
             ),
             'created_at' => $this->created_at,
         ];

@@ -87,15 +87,19 @@ class AuthController extends Controller
             $token = $user->createToken('auth');
             $token->accessToken->forceFill(['restaurant_id' => $restaurant->id])->save();
 
-            return [$user, $restaurant, $token->plainTextToken];
+            $acces->load('role.permissions');
+
+            return [$user, $restaurant, $token->plainTextToken, $acces->role];
         });
 
-        [$user, $restaurant, $plainTextToken] = $result;
+        [$user, $restaurant, $plainTextToken, $role] = $result;
 
         return response()->json([
             'token' => $plainTextToken,
             'user' => new UserResource($user),
             'restaurant' => new RestaurantResource($restaurant),
+            'role' => $role->code,
+            'permissions' => $role->permissions->pluck('code'),
         ], 201);
     }
 
@@ -135,6 +139,7 @@ class AuthController extends Controller
 
         if ($accesActifs->count() === 1) {
             $acces = $accesActifs->first();
+            $acces->load('role.permissions');
             $token = $user->createToken('auth');
             $token->accessToken->forceFill(['restaurant_id' => $acces->restaurant_id])->save();
 
@@ -142,6 +147,8 @@ class AuthController extends Controller
                 'token' => $token->plainTextToken,
                 'user' => new UserResource($user),
                 'restaurant' => new RestaurantResource($acces->restaurant),
+                'role' => $acces->role->code,
+                'permissions' => $acces->role->permissions->pluck('code'),
             ]);
         }
 
@@ -175,7 +182,7 @@ class AuthController extends Controller
         $acces = RestaurantUtilisateur::where('utilisateur_id', $user->id)
             ->where('restaurant_id', $request->validated('restaurant_id'))
             ->where('statut', StatutAcces::ACTIF)
-            ->with('restaurant')
+            ->with(['restaurant', 'role.permissions'])
             ->first();
 
         if (! $acces) {
@@ -194,6 +201,8 @@ class AuthController extends Controller
             'token' => $token->plainTextToken,
             'user' => new UserResource($user),
             'restaurant' => new RestaurantResource($acces->restaurant),
+            'role' => $acces->role->code,
+            'permissions' => $acces->role->permissions->pluck('code'),
         ]);
     }
 
@@ -202,5 +211,83 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Déconnecté.']);
+    }
+
+    public function changerMotDePasse(\App\Http\Requests\ChangerMotDePasseRequest $request)
+    {
+        $user = $request->user();
+
+        if (! Hash::check($request->validated('mot_de_passe_actuel'), $user->password)) {
+            throw ValidationException::withMessages([
+                'mot_de_passe_actuel' => ['Mot de passe actuel incorrect.'],
+            ]);
+        }
+
+        $user->update(['password' => $request->validated('nouveau_mot_de_passe')]);
+
+        return response()->json(['message' => 'Mot de passe modifié avec succès.']);
+    }
+
+    public function modifierProfil(\App\Http\Requests\ModifierProfilRequest $request)
+    {
+        $user = $request->user();
+        $user->update($request->validated());
+
+        return response()->json([
+            'user' => new UserResource($user),
+        ]);
+    }
+
+    /**
+     * ⚠️ Pas d'envoi d'email réel configuré — même approche que les
+     * invitations employés : le lien est renvoyé directement dans la réponse
+     * pour être affiché/copié à l'écran, plutôt qu'envoyé par email.
+     * Le message reste générique côté frontend, que le compte existe ou non
+     * (évite de révéler si un email est enregistré).
+     */
+    public function motDePasseOublie(\App\Http\Requests\MotDePasseOublieRequest $request)
+    {
+        $email = $request->validated('email');
+        $user = User::where('email', $email)->first();
+
+        if (! $user) {
+            return response()->json(['message' => 'Si un compte existe avec cet email, un lien a été généré.']);
+        }
+
+        $token = \Illuminate\Support\Str::random(64);
+
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $email],
+            ['token' => Hash::make($token), 'created_at' => now()]
+        );
+
+        $lienReinitialisation = config('app.frontend_url').'/reinitialisation?email='.urlencode($email).'&token='.$token;
+
+        return response()->json([
+            'message' => 'Si un compte existe avec cet email, un lien a été généré.',
+            'reset_url' => $lienReinitialisation,
+        ]);
+    }
+
+    public function reinitialiserMotDePasse(\App\Http\Requests\ReinitialiserMotDePasseRequest $request)
+    {
+        $data = $request->validated();
+
+        $enregistrement = DB::table('password_reset_tokens')->where('email', $data['email'])->first();
+
+        if (! $enregistrement || ! Hash::check($data['token'], $enregistrement->token)) {
+            throw ValidationException::withMessages(['token' => ['Lien invalide ou déjà utilisé.']]);
+        }
+
+        if (now()->diffInMinutes($enregistrement->created_at) > 60) {
+            throw ValidationException::withMessages(['token' => ['Ce lien a expiré. Demandez-en un nouveau.']]);
+        }
+
+        $user = User::where('email', $data['email'])->firstOrFail();
+        $user->update(['password' => $data['nouveau_mot_de_passe']]);
+
+        DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
+
+        return response()->json(['message' => 'Mot de passe réinitialisé avec succès.']);
     }
 }

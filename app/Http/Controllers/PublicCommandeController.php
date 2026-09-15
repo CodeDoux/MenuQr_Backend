@@ -14,10 +14,13 @@ use App\Http\Resources\CommandeResource;
 use App\Models\Addition;
 use App\Models\Commande;
 use App\Models\Facture;
+use App\Models\Notification;
 use App\Models\Paiement;
 use App\Models\Produit;
 use App\Models\QRCode;
+use App\Models\RestaurantUtilisateur;
 use App\Models\Scopes\RestaurantScope;
+use App\Models\TableRestaurant;
 use App\Models\Variante;
 use App\Models\Visite;
 use Illuminate\Support\Facades\DB;
@@ -89,6 +92,12 @@ class PublicCommandeController extends Controller
                         'date_debut' => now(),
                         'statut' => StatutVisite::EN_COURS,
                     ]);
+
+                    // ⚠️ Rien ne marquait jamais la table comme occupée —
+                    // corrigé ici, au moment précis où une visite démarre.
+                    \App\Models\TableRestaurant::withoutGlobalScope(RestaurantScope::class)
+                        ->where('id', $qrCode->table_id)
+                        ->update(['statut' => 'OCCUPEE']);
                 }
                 $visiteId = $visite->id;
                 if ($data['mode'] === 'SUR_PLACE') {
@@ -117,6 +126,11 @@ class PublicCommandeController extends Controller
                 'remise' => 0,
                 'total' => $sousTotal + $fraisLivraison,
                 'notes' => $data['notes'] ?? null,
+                'nom_client' => $data['nom_client'] ?? null,
+                'telephone_client' => $data['telephone_client'] ?? null,
+                'heure_retrait_souhaitee' => isset($data['heure_retrait_souhaitee'])
+                    ? \Illuminate\Support\Carbon::parse($data['heure_retrait_souhaitee'])
+                    : null,
             ]);
 
             foreach ($lignes as $ligne) {
@@ -150,6 +164,8 @@ class PublicCommandeController extends Controller
                 $this->recalculerAddition($visiteId);
             }
 
+            $this->notifierNouvelleCommande($commande, $qrCode->restaurant_id, $tableId);
+
             return $commande;
         });
 
@@ -164,7 +180,8 @@ class PublicCommandeController extends Controller
         return new CommandeResource($commande);
     }
 
-    /** Récupère les autres commandes de la même visite (RM08). */
+    /** Récupère les autres commandes de la MÊME addition (donc jamais celles
+     *  déjà payées via une addition précédente sur la même visite). */
     public function commandesDeLaVisite(string $commandeId)
     {
         $commande = Commande::withoutGlobalScope(RestaurantScope::class)->findOrFail($commandeId);
@@ -174,6 +191,7 @@ class PublicCommandeController extends Controller
 
         $commandes = Commande::withoutGlobalScope(RestaurantScope::class)
             ->where('visite_id', $commande->visite_id)
+            ->where('addition_id', $commande->addition_id)
             ->with(['lignes.produit' => fn ($q) => $q->withoutGlobalScope(RestaurantScope::class)])
             ->get();
 
@@ -220,25 +238,77 @@ class PublicCommandeController extends Controller
         return response()->json(['message' => 'Paiement confirmé.', 'paiement_id' => $paiement->id]);
     }
 
+    /**
+     * ⚠️ CORRIGÉ — l'ancienne version resommait TOUTES les commandes de la
+     * visite à chaque appel, y compris celles déjà couvertes par une
+     * addition précédente déjà payée (double-facturation). Chaque commande
+     * est maintenant explicitement rattachée à UNE addition précise
+     * (commandes.addition_id) dès qu'elle y est intégrée, et n'est plus
+     * jamais reprise dans le calcul d'une addition suivante.
+     */
     private function recalculerAddition(string $visiteId): void
     {
-        $commandes = Commande::withoutGlobalScope(RestaurantScope::class)
+        $addition = Addition::where('visite_id', $visiteId)->where('statut', StatutAddition::OUVERTE)->first();
+
+        if (!$addition) {
+            $addition = Addition::create([
+                'visite_id' => $visiteId, 'sous_total' => 0, 'remise' => 0,
+                'taxe' => 0, 'total' => 0, 'statut' => StatutAddition::OUVERTE,
+            ]);
+        }
+
+        // Rattache à CETTE addition uniquement les commandes de la visite pas
+        // encore rattachées à une addition (donc jamais celles déjà payées
+        // via une addition précédente).
+        Commande::withoutGlobalScope(RestaurantScope::class)
             ->where('visite_id', $visiteId)
             ->where('statut', '!=', StatutCommande::ANNULEE)
+            ->whereNull('addition_id')
+            ->update(['addition_id' => $addition->id]);
+
+        // Le total ne provient QUE des commandes rattachées à cette addition précise.
+        $commandes = Commande::withoutGlobalScope(RestaurantScope::class)
+            ->where('addition_id', $addition->id)
             ->with('lignes')->get();
 
         $sousTotal = $commandes->flatMap->lignes->sum('sous_total');
         $fraisLivraison = $commandes->sum('frais_livraison');
         $total = $sousTotal + $fraisLivraison;
 
-        $addition = Addition::where('visite_id', $visiteId)->where('statut', StatutAddition::OUVERTE)->first();
+        $addition->update(['sous_total' => $sousTotal, 'total' => $total]);
+    }
 
-        if ($addition) {
-            $addition->update(['sous_total' => $sousTotal, 'total' => $total]);
-        } else {
-            Addition::create([
-                'visite_id' => $visiteId, 'sous_total' => $sousTotal, 'remise' => 0,
-                'taxe' => 0, 'total' => $total, 'statut' => StatutAddition::OUVERTE,
+    /**
+     * Notifie chaque membre du staff ayant la permission de faire avancer
+     * une commande (Propriétaire, Gérant, Serveur, Cuisinier) qu'une
+     * nouvelle commande vient d'arriver.
+     */
+    private function notifierNouvelleCommande(Commande $commande, string $restaurantId, ?string $tableId): void
+    {
+        $staffANotifier = RestaurantUtilisateur::withoutGlobalScope(RestaurantScope::class)
+            ->where('restaurant_id', $restaurantId)
+            ->where('statut', 'ACTIF')
+            ->whereHas('role.permissions', fn ($q) => $q->where('code', 'commande.gerer_statut'))
+            ->get();
+
+        $numero = '#'.strtoupper(substr($commande->id, -4));
+        $suffixeTable = '';
+        if ($tableId) {
+            $table = TableRestaurant::withoutGlobalScope(RestaurantScope::class)->find($tableId);
+            if ($table) {
+                $suffixeTable = " — Table {$table->numero}";
+            }
+        }
+
+        foreach ($staffANotifier as $acces) {
+            Notification::create([
+                'utilisateur_id' => $acces->utilisateur_id,
+                'titre' => 'Nouvelle commande',
+                'message' => "Commande {$numero} reçue{$suffixeTable}",
+                'type' => 'NOUVELLE_COMMANDE',
+                'lien' => '/commandes',
+                'est_lu' => false,
+                'date_envoie' => now(),
             ]);
         }
     }
