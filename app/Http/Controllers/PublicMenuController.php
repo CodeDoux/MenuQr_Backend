@@ -89,6 +89,42 @@ class PublicMenuController extends Controller
                 ->get()
                 ->pluck('methode');
 
+
+                $promotionsActives = \App\Models\Promotion::withoutGlobalScope(RestaurantScope::class)
+            ->where('restaurant_id', $qrCode->restaurant_id)
+            ->where('est_active', true)
+            ->where('date_debut', '<=', now())
+            ->where(function ($q) {
+                $q->whereNull('date_fin')->orWhere('date_fin', '>=', now());
+            })
+            ->where(function ($q) {
+                $q->whereNull('limite_utilisation')->orWhereColumn('nombre_utilisations', '<', 'limite_utilisation');
+            })
+            ->with(['produits' => fn ($q) => $q->withoutGlobalScope(\App\Models\Scopes\RestaurantScope::class)])
+            ->get();
+
+                // Map produit_id -> { type, valeur } pour les promos ciblées PRODUIT
+                $promotionsParProduit = [];
+                $promotionGlobale = null;
+
+                foreach ($promotionsActives as $promo) {
+                    if ($promo->cible === \App\Enums\CiblePromotion::PRODUIT) {
+                        foreach ($promo->produits as $p) {
+                            $promotionsParProduit[$p->id] = [
+                                'type_reduction' => $promo->type_reduction->value,
+                                'valeur' => (float) $promo->valeur,
+                            ];
+                        }
+                    } elseif ($promo->cible === \App\Enums\CiblePromotion::COMMANDE_ENTIERE) {
+                        // S'il y en a plusieurs, on affiche la première trouvée (rare en pratique)
+                        $promotionGlobale ??= [
+                            'nom' => $promo->nom,
+                            'type_reduction' => $promo->type_reduction->value,
+                            'valeur' => (float) $promo->valeur,
+                        ];
+                    }
+                }
+
             return [
                 'restaurant_nom' => $restaurant?->nom,
                 'restaurant_adresse' => $restaurant?->adresse,
@@ -99,6 +135,8 @@ class PublicMenuController extends Controller
                 'menus' => MenuResource::collection($menus)->resolve(),
                 'produits' => ProduitResource::collection($produits)->resolve(),
                 'zones_livraison' => \App\Http\Resources\ZoneLivraisonResource::collection($zones)->resolve(),
+                'promotions_produits' => $promotionsParProduit,
+                'promotion_globale' => $promotionGlobale,
             ];
         });
 
