@@ -86,14 +86,14 @@ class AuthController extends Controller
             $token = $user->createToken('auth');
             $token->accessToken->forceFill(['restaurant_id' => $restaurant->id])->save();
 
-            $urlVerification = $this->genererLienVerification($user->email);
+            $this->envoyerLienVerification($user->email);
 
             $acces->load('role.permissions');
 
-            return [$user, $restaurant, $token->plainTextToken, $acces->role, $urlVerification];
+            return [$user, $restaurant, $token->plainTextToken, $acces->role];
         });
 
-        [$user, $restaurant, $plainTextToken, $role, $urlVerification] = $result;
+        [$user, $restaurant, $plainTextToken, $role] = $result;
 
         return response()->json([
             'token' => $plainTextToken,
@@ -101,7 +101,6 @@ class AuthController extends Controller
             'restaurant' => new RestaurantResource($restaurant),
             'role' => $role->code,
             'permissions' => $role->permissions->pluck('code'),
-            'verification_url' => $urlVerification,
         ], 201);
     }
 
@@ -236,7 +235,7 @@ class AuthController extends Controller
         $user = User::where('email', $email)->first();
 
         if (! $user) {
-            return response()->json(['message' => 'Si un compte existe avec cet email, un lien a été généré.']);
+            return response()->json(['message' => 'Si un compte existe avec cet email, un lien a été envoyé.']);
         }
 
         $token = \Illuminate\Support\Str::random(64);
@@ -248,10 +247,9 @@ class AuthController extends Controller
 
         $lienReinitialisation = config('app.frontend_url').'/reinitialisation?email='.urlencode($email).'&token='.$token;
 
-        return response()->json([
-            'message' => 'Si un compte existe avec cet email, un lien a été généré.',
-            'reset_url' => $lienReinitialisation,
-        ]);
+        \Illuminate\Support\Facades\Mail::to($email)->send(new \App\Mail\MotDePasseOublieMail($lienReinitialisation));
+
+        return response()->json(['message' => 'Si un compte existe avec cet email, un lien a été envoyé.']);
     }
 
     public function reinitialiserMotDePasse(\App\Http\Requests\ReinitialiserMotDePasseRequest $request)
@@ -313,12 +311,12 @@ class AuthController extends Controller
             return response()->json(['message' => 'Cet email est déjà vérifié.']);
         }
 
-        $url = $this->genererLienVerification($user->email);
+        $this->envoyerLienVerification($user->email);
 
-        return response()->json(['message' => 'Lien généré.', 'verification_url' => $url]);
+        return response()->json(['message' => 'Email de vérification envoyé.']);
     }
 
-    private function genererLienVerification(string $email): string
+    private function envoyerLienVerification(string $email): void
     {
         $token = \Illuminate\Support\Str::random(64);
 
@@ -327,6 +325,8 @@ class AuthController extends Controller
             ['token' => Hash::make($token), 'created_at' => now()]
         );
 
-        return config('app.frontend_url').'/verification-email?email='.urlencode($email).'&token='.$token;
+        $lien = config('app.frontend_url').'/verification-email?email='.urlencode($email).'&token='.$token;
+
+        \Illuminate\Support\Facades\Mail::to($email)->send(new \App\Mail\VerificationEmailMail($lien));
     }
 }
