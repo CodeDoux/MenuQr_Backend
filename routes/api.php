@@ -39,7 +39,7 @@ Route::post('/auth/register', [AuthController::class, 'register'])->middleware('
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:6,1');
 Route::post('/auth/mot-de-passe-oublie', [AuthController::class, 'motDePasseOublie'])->middleware('throttle:6,1');
 Route::post('/auth/reinitialiser-mot-de-passe', [AuthController::class, 'reinitialiserMotDePasse'])->middleware('throttle:6,1');
-
+Route::post('/auth/verifier-email', [AuthController::class, 'verifierEmail'])->middleware('throttle:6,1');
 Route::get('/invitations/{employeId}', [InvitationController::class, 'show'])->middleware('throttle:30,1');
 Route::post('/invitations/{employeId}/accepter', [InvitationController::class, 'accepter'])->middleware('throttle:6,1');
 
@@ -59,6 +59,7 @@ Route::middleware(['auth:sanctum', 'throttle:30,1'])->group(function () {
 
 // --- Authentifié + contexte restaurant actif requis ---
 Route::middleware(['auth:sanctum', 'restaurant.access', 'throttle:120,1'])->group(function () {
+    Route::post('/auth/renvoyer-verification-email', [AuthController::class, 'renvoyerVerificationEmail']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::put('/auth/mot-de-passe', [AuthController::class, 'changerMotDePasse']);
     Route::put('/auth/profil', [AuthController::class, 'modifierProfil']);

@@ -25,9 +25,10 @@ class AuthController extends Controller
 {
     /**
      * Inscription libre-service (décision actée : essai gratuit automatique,
-     * aucun frais). Crée le Restaurant, l'Utilisateur, son accès Propriétaire
-     * (déjà actif — pas d'invitation à s'accepter soi-même), et l'Abonnement
-     * en période d'essai sur l'offre choisie.
+     * aucun frais, AUCUN BLOCAGE le temps de vérifier l'email — cohérent
+     * avec la philosophie "zéro friction" déjà actée pour ce flux). La
+     * vérification d'email est donc un simple rappel affiché côté frontend
+     * tant que email_verifie_le est null, jamais un blocage de connexion.
      */
     public function register(RegisterRequest $request)
     {
@@ -70,8 +71,6 @@ class AuthController extends Controller
                 'renouvellement_automatique' => false,
             ]);
 
-            // Amorçage : 7 jours (à configurer par le restaurant) + les 5 moyens
-            // de paiement possibles (désactivés par défaut, à activer un à un).
             foreach (['LUNDI', 'MARDI', 'MERCREDI', 'JEUDI', 'VENDREDI', 'SAMEDI', 'DIMANCHE'] as $jour) {
                 \App\Models\Horaire::create([
                     'restaurant_id' => $restaurant->id, 'jour_semaine' => $jour,
@@ -87,12 +86,14 @@ class AuthController extends Controller
             $token = $user->createToken('auth');
             $token->accessToken->forceFill(['restaurant_id' => $restaurant->id])->save();
 
+            $urlVerification = $this->genererLienVerification($user->email);
+
             $acces->load('role.permissions');
 
-            return [$user, $restaurant, $token->plainTextToken, $acces->role];
+            return [$user, $restaurant, $token->plainTextToken, $acces->role, $urlVerification];
         });
 
-        [$user, $restaurant, $plainTextToken, $role] = $result;
+        [$user, $restaurant, $plainTextToken, $role, $urlVerification] = $result;
 
         return response()->json([
             'token' => $plainTextToken,
@@ -100,14 +101,10 @@ class AuthController extends Controller
             'restaurant' => new RestaurantResource($restaurant),
             'role' => $role->code,
             'permissions' => $role->permissions->pluck('code'),
+            'verification_url' => $urlVerification,
         ], 201);
     }
 
-    /**
-     * Connexion. Si l'utilisateur a plusieurs restaurants actifs, renvoie un
-     * token pré-auth temporaire (aucun restaurant_id, capacité limitée à
-     * select-restaurant) plutôt qu'un token final déjà scopé.
-     */
     public function login(LoginRequest $request)
     {
         $data = $request->validated();
@@ -152,7 +149,6 @@ class AuthController extends Controller
             ]);
         }
 
-        // Plusieurs restaurants : token pré-auth de courte durée, sans restaurant_id.
         $preAuthToken = $user->createToken('pre-auth', ['select-restaurant'], now()->addMinutes(5));
 
         return response()->json([
@@ -163,10 +159,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * Deuxième étape du login multi-restaurant : échange le token pré-auth
-     * contre un token final scopé au restaurant choisi.
-     */
     public function selectRestaurant(SelectRestaurantRequest $request)
     {
         $user = $request->user();
@@ -238,13 +230,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * ⚠️ Pas d'envoi d'email réel configuré — même approche que les
-     * invitations employés : le lien est renvoyé directement dans la réponse
-     * pour être affiché/copié à l'écran, plutôt qu'envoyé par email.
-     * Le message reste générique côté frontend, que le compte existe ou non
-     * (évite de révéler si un email est enregistré).
-     */
     public function motDePasseOublie(\App\Http\Requests\MotDePasseOublieRequest $request)
     {
         $email = $request->validated('email');
@@ -289,5 +274,59 @@ class AuthController extends Controller
         DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
 
         return response()->json(['message' => 'Mot de passe réinitialisé avec succès.']);
+    }
+
+    /**
+     * ⚠️ Même approche que le reste (pas d'email réel envoyé) : le lien est
+     * renvoyé dans la réponse. NE BLOQUE JAMAIS la connexion (décision
+     * actée) — sert uniquement à afficher un bandeau de rappel côté frontend
+     * tant que email_verifie_le est null.
+     */
+    public function verifierEmail(\Illuminate\Http\Request $request)
+    {
+        $data = $request->validate(['email' => ['required', 'email'], 'token' => ['required', 'string']]);
+
+        $enregistrement = DB::table('email_verification_tokens')->where('email', $data['email'])->first();
+
+        if (! $enregistrement || ! Hash::check($data['token'], $enregistrement->token)) {
+            throw ValidationException::withMessages(['token' => ['Lien invalide ou déjà utilisé.']]);
+        }
+
+        if (now()->diffInHours($enregistrement->created_at) > 24) {
+            throw ValidationException::withMessages(['token' => ['Ce lien a expiré. Demandez-en un nouveau.']]);
+        }
+
+        User::where('email', $data['email'])->update(['email_verifie_le' => now()]);
+
+        DB::table('email_verification_tokens')->where('email', $data['email'])->delete();
+
+        return response()->json(['message' => 'Email vérifié avec succès.']);
+    }
+
+    /** Renvoie un nouveau lien — l'utilisateur doit être connecté (pas
+     *  besoin de ressaisir son email, on utilise le sien directement). */
+    public function renvoyerVerificationEmail(\Illuminate\Http\Request $request)
+    {
+        $user = $request->user();
+
+        if ($user->email_verifie_le) {
+            return response()->json(['message' => 'Cet email est déjà vérifié.']);
+        }
+
+        $url = $this->genererLienVerification($user->email);
+
+        return response()->json(['message' => 'Lien généré.', 'verification_url' => $url]);
+    }
+
+    private function genererLienVerification(string $email): string
+    {
+        $token = \Illuminate\Support\Str::random(64);
+
+        DB::table('email_verification_tokens')->updateOrInsert(
+            ['email' => $email],
+            ['token' => Hash::make($token), 'created_at' => now()]
+        );
+
+        return config('app.frontend_url').'/verification-email?email='.urlencode($email).'&token='.$token;
     }
 }
