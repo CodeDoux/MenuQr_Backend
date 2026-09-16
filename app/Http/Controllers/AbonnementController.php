@@ -11,6 +11,9 @@ use App\Models\Abonnement;
 use App\Models\FactureAbonnement;
 use App\Services\TenantContext;
 use Illuminate\Support\Facades\Gate;
+use App\Services\PaydunyaService;
+use App\Models\Paiement;
+use Illuminate\Support\Facades\DB;
 
 class AbonnementController extends Controller
 {
@@ -80,4 +83,55 @@ class AbonnementController extends Controller
             abort(403, 'Action réservée au Propriétaire.');
         }
     }
+
+    /** Démarre un paiement PayDunya pour renouveler l'abonnement du restaurant
+ *  courant. Crée la Facture (EN_ATTENTE) et le Paiement (EN_ATTENTE) liés,
+ *  puis renvoie l'URL PayDunya vers laquelle rediriger le restaurateur. */
+public function payer(PaydunyaService $paydunya)
+{
+    $this->autoriserGestion();
+
+    $abonnement = Abonnement::with('offre')
+        ->where('restaurant_id', $this->tenant->restaurantId)
+        ->latest('date_debut')->firstOrFail();
+    $offre = $abonnement->offre;
+
+    [$facture, $paiement] = DB::transaction(function () use ($abonnement, $offre) {
+        $facture = FactureAbonnement::create([
+            'abonnement_id' => $abonnement->id,
+            'numero' => 'FACAB-'.now()->format('YmdHis'),
+            'montant' => $offre->prix_mensuel,
+            'date_emission' => now(),
+            'date_echeance' => now()->addDays(7),
+            'statut' => 'EN_ATTENTE',
+        ]);
+
+        $paiement = Paiement::create([
+            'type' => 'ABONNEMENT',
+            'facture_abonnement_id' => $facture->id,
+            'montant' => $offre->prix_mensuel,
+            'devise' => 'FCFA',
+            'methode' => 'AUTRE', // ⚠️ inconnu tant que le client n'a pas choisi sur PayDunya
+            'statut' => 'EN_ATTENTE',
+        ]);
+
+        return [$facture, $paiement];
+    });
+
+    try {
+        $resultat = $paydunya->creerFacture(
+            (float) $offre->prix_mensuel,
+            "Abonnement MenuQr — {$offre->nom}",
+            config('app.frontend_url').'/abonnement?paiement=retour',
+            config('app.url').'/api/public/paydunya/webhook'
+        );
+    } catch (\RuntimeException $e) {
+        $paiement->update(['statut' => 'ECHOUE']);
+        return response()->json(['message' => $e->getMessage()], 422);
+    }
+
+    $paiement->update(['reference' => $resultat['token']]);
+
+    return response()->json(['url_paiement' => $resultat['url']]);
+}
 }

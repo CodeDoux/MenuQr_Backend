@@ -45,6 +45,7 @@ Route::post('/invitations/{employeId}/accepter', [InvitationController::class, '
 
 // --- Zone client publique (menu numérique + commande) ---
 Route::prefix('public')->group(function () {
+    Route::post('/paydunya/webhook', [PaydunyaWebhookController::class, 'handle']);
     Route::get('/menu', [PublicMenuController::class, 'show'])->middleware('throttle:60,1');
     Route::post('/commandes', [PublicCommandeController::class, 'store'])->middleware('throttle:20,1');
     Route::get('/commandes/{id}', [PublicCommandeController::class, 'show'])->middleware('throttle:60,1');
@@ -59,6 +60,8 @@ Route::middleware(['auth:sanctum', 'throttle:30,1'])->group(function () {
 
 // --- Authentifié + contexte restaurant actif requis ---
 Route::middleware(['auth:sanctum', 'restaurant.access', 'throttle:120,1'])->group(function () {
+
+    Route::post('/abonnement/payer', [AbonnementController::class, 'payer']);
     Route::post('/auth/renvoyer-verification-email', [AuthController::class, 'renvoyerVerificationEmail']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::put('/auth/mot-de-passe', [AuthController::class, 'changerMotDePasse']);
