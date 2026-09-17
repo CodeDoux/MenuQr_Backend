@@ -7,6 +7,7 @@ use App\Enums\StatutEmploye;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\EmployeRequest;
 use App\Http\Resources\EmployeResource;
+use App\Mail\InvitationEmployeMail;
 use App\Models\Employe;
 use App\Models\RestaurantUtilisateur;
 use App\Models\Role;
@@ -15,19 +16,17 @@ use App\Models\User;
 use App\Services\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Mail;
 
 class EmployeController extends Controller
 {
     public function __construct(
-    private readonly TenantContext $tenant,
-    private readonly JournalService $journal
-) {}
+        private readonly TenantContext $tenant,
+        private readonly JournalService $journal
+    ) {}
 
     public function index()
     {
-        // ⚠️ Corrigé — la policy laissait n'importe quel rôle staff consulter
-        // la liste des employés. Seuls ceux ayant la permission de GÉRER les
-        // employés (Propriétaire/Gérant) doivent pouvoir la voir.
         if (! $this->tenant->aLaPermission('employe.gerer')) {
             abort(403);
         }
@@ -44,16 +43,15 @@ class EmployeController extends Controller
         $data = $request->validated();
 
         $employe = DB::transaction(function () use ($data) {
-            // Réutilise l'Utilisateur existant si cet email est déjà connu
-            // (une personne peut appartenir à plusieurs restaurants), sinon
-            // en crée un nouveau SANS mot de passe (pas encore "connectable"
-            // tant que l'invitation n'est pas acceptée).
             $utilisateur = User::firstOrCreate(
                 ['email' => $data['email']],
                 ['nom_complet' => $data['nom_complet'], 'password' => null, 'statut' => 'ACTIF']
             );
 
             $accesId = null;
+            $acces = null;
+            $role = null;
+
             if ($data['accorder_acces']) {
                 $role = Role::where('code', $data['role'])->firstOrFail();
 
@@ -61,14 +59,13 @@ class EmployeController extends Controller
                     ['restaurant_id' => $this->tenant->restaurantId, 'utilisateur_id' => $utilisateur->id],
                     ['role_id' => $role->id, 'statut' => StatutAcces::INVITE, 'date_invitation' => now()]
                 );
-                // Si l'accès existait déjà (rare), on aligne au moins le rôle demandé
                 if ($acces->role_id !== $role->id) {
                     $acces->update(['role_id' => $role->id]);
                 }
                 $accesId = $acces->id;
             }
 
-            return Employe::create([
+            $employe = Employe::create([
                 'utilisateur_id' => $utilisateur->id,
                 'poste_id' => $data['poste_id'],
                 'restaurant_utilisateur_id' => $accesId,
@@ -77,6 +74,14 @@ class EmployeController extends Controller
                 'statut' => $data['statut'],
                 'notes' => $data['notes'] ?? null,
             ]);
+
+            // N'envoie l'email que si l'accès est réellement en attente
+            // d'acceptation (pas si la personne a déjà un compte actif ailleurs).
+            if ($acces && $acces->statut === StatutAcces::INVITE) {
+                $this->envoyerInvitation($employe, $utilisateur, $role);
+            }
+
+            return $employe;
         });
 
         $this->journal->enregistrer('creation_employe', 'employes', $employe->id, null, ['nom' => $data['nom_complet']]);
@@ -113,6 +118,9 @@ class EmployeController extends Controller
                         'date_invitation' => now(),
                     ]);
                     $accesId = $acces->id;
+
+                    // Nouvel accès créé depuis Modifier : c'est aussi une invitation.
+                    $this->envoyerInvitation($employeModel, $employeModel->utilisateur, $role);
                 }
             } elseif ($employeModel->accesPlateforme) {
                 $employeModel->accesPlateforme->update(['statut' => StatutAcces::REVOQUE]);
@@ -148,7 +156,7 @@ class EmployeController extends Controller
 
     public function renvoyerInvitation(string $employe)
     {
-        $employeModel = Employe::with('accesPlateforme')->findOrFail($employe);
+        $employeModel = Employe::with(['accesPlateforme.role', 'utilisateur'])->findOrFail($employe);
         Gate::authorize('update', $employeModel);
 
         if (!$employeModel->accesPlateforme || $employeModel->accesPlateforme->statut !== StatutAcces::INVITE) {
@@ -157,6 +165,20 @@ class EmployeController extends Controller
 
         $employeModel->accesPlateforme->update(['date_invitation' => now()]);
 
-        return response()->json(['message' => 'Invitation renvoyée (simulation — envoi email à implémenter).']);
+        $this->envoyerInvitation($employeModel, $employeModel->utilisateur, $employeModel->accesPlateforme->role);
+
+        return response()->json(['message' => 'Invitation renvoyée par email.']);
+    }
+
+    private function envoyerInvitation(Employe $employe, User $utilisateur, Role $role): void
+    {
+        $lien = config('app.frontend_url')."/invitations/{$employe->id}";
+
+        Mail::to($utilisateur->email)->send(new InvitationEmployeMail(
+            $utilisateur->nom_complet,
+            $this->tenant->restaurant->nom,
+            $role->nom,
+            $lien
+        ));
     }
 }
