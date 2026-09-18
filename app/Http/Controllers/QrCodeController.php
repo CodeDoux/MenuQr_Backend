@@ -15,27 +15,23 @@ use Illuminate\Support\Str;
 use SimpleSoftwareIO\QrCode\Facades\QrCode as QrCodeGenerator;
 
 /**
- * ⚠️ Génération server-side (contrairement au frontend qui la faisait
- * côté client) : permet de stocker une vraie image persistée et de
- * suivre nombre_scan de façon fiable. FRONTEND_URL (.env) nécessaire
- * car le backend ne connaît pas l'origine du frontend automatiquement.
+ * ⚠️ Génération server-side. Stockage via l'abstraction Storage de Laravel,
+ * SANS préciser de disque explicitement — utilise celui défini par
+ * FILESYSTEM_DISK dans .env (désormais "r2", Cloudflare R2).
  *
  * ⚠️ QRCode n'a pas de scope automatique (BelongsToRestaurant) — chaque
- * méthode doit filtrer explicitement par restaurant_id. index() et
- * desactiver() ne le faisaient pas (fuite corrigée).
+ * méthode doit filtrer explicitement par restaurant_id.
  */
 class QrCodeController extends Controller
 {
     public function __construct(private readonly TenantContext $tenant) {}
 
-    /** Génère (ou régénère) le QR d'une table précise. */
     public function genererPourTable(string $salle, string $tableId)
     {
         $salleModel = Salle::findOrFail($salle);
         $table = $salleModel->tables()->findOrFail($tableId);
         Gate::authorize('create', QRCode::class);
 
-        // Désactive l'éventuel QR de table déjà actif pour cette table
         QRCode::where('table_id', $table->id)->where('est_actif', true)->update(['est_actif' => false]);
 
         $qrCode = $this->creerQrCode(TypeQRCode::TABLE, $table->id);
@@ -43,7 +39,6 @@ class QrCodeController extends Controller
         return new QrCodeResource($qrCode);
     }
 
-    /** Génère (ou régénère) un QR général (emporter/livraison, non lié à une table). */
     public function genererGeneral(QrCodeGeneralRequest $request)
     {
         Gate::authorize('create', QRCode::class);
@@ -74,7 +69,6 @@ class QrCodeController extends Controller
 
     public function desactiver(string $id)
     {
-        
         $qrCode = QRCode::where('restaurant_id', $this->tenant->restaurantId)->findOrFail($id);
         Gate::authorize('delete', $qrCode);
 
@@ -96,8 +90,8 @@ class QrCodeController extends Controller
 
         $pngBinaire = QrCodeGenerator::format('svg')->size(320)->margin(1)->generate($url);
         $chemin = "qrcodes/{$this->tenant->restaurantId}/".Str::uuid().'.svg';
-        Storage::disk('public')->put($chemin, $pngBinaire);
-        $imageUrl = Storage::disk('public')->url($chemin);
+        Storage::put($chemin, $pngBinaire);
+        $imageUrl = Storage::url($chemin);
 
         return QRCode::create([
             'restaurant_id' => $this->tenant->restaurantId,

@@ -11,6 +11,8 @@ beforeEach(function () {
 });
 
 test('flux complet : demande de réinitialisation puis changement effectif du mot de passe', function () {
+    \Illuminate\Support\Facades\Mail::fake();
+
     $user = User::create([
         'nom_complet' => 'Test', 'email' => 'oubli@test.com',
         'password' => Hash::make('ancienMotDePasse'), 'statut' => 'ACTIF',
@@ -24,12 +26,17 @@ test('flux complet : demande de réinitialisation puis changement effectif du mo
         'role_id' => $role->id, 'statut' => 'ACTIF', 'date_acceptation' => now(),
     ]);
 
-    $repDemande = $this->postJson('/api/auth/mot-de-passe-oublie', ['email' => 'oubli@test.com']);
-    $repDemande->assertOk();
-    $resetUrl = $repDemande->json('reset_url');
-    expect($resetUrl)->not->toBeNull();
+    $this->postJson('/api/auth/mot-de-passe-oublie', ['email' => 'oubli@test.com'])->assertOk();
 
-    parse_str(parse_url($resetUrl, PHP_URL_QUERY), $params);
+    $lienCapture = null;
+    \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\MotDePasseOublieMail::class, function ($mail) use (&$lienCapture) {
+        $lienCapture = $mail->lienReinitialisation;
+        return true;
+    });
+
+    expect($lienCapture)->not->toBeNull();
+
+    parse_str(parse_url($lienCapture, PHP_URL_QUERY), $params);
     $token = $params['token'];
 
     $this->postJson('/api/auth/reinitialiser-mot-de-passe', [
