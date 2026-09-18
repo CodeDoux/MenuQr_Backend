@@ -31,6 +31,8 @@ use App\Http\Controllers\ZoneLivraisonController;
 use App\Http\Controllers\NotificationController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\StatistiquesController;
+use App\Http\Controllers\AdminImpersonationController;
+use App\Http\Controllers\JournalAdminController;
 
 // --- Public ---
 Route::get('/offres', [OffreController::class, 'index'])->middleware('throttle:60,1');
@@ -172,6 +174,10 @@ Route::middleware(['auth:sanctum', 'restaurant.access', 'throttle:120,1'])->grou
 Route::post('/admin/login', [AdminAuthController::class, 'login'])->middleware('throttle:6,1');
 
 Route::middleware(['auth:sanctum', 'admin', 'throttle:120,1'])->prefix('admin')->group(function () {
+
+    Route::post('/restaurants/{restaurantId}/impersonate', [AdminImpersonationController::class, 'impersonate']);
+    Route::get('/journal', [JournalAdminController::class, 'index']);
+
     Route::post('/logout', [AdminAuthController::class, 'logout']);
 
     Route::get('/restaurants', [AdminRestaurantController::class, 'index']);

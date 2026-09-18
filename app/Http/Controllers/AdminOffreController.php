@@ -7,10 +7,13 @@ use App\Http\Requests\AdminOffreRequest;
 use App\Http\Resources\AdminOffreResource;
 use App\Models\Fonctionnalite;
 use App\Models\Offre;
+use App\Services\AdminJournalService;
 use Illuminate\Support\Facades\DB;
 
 class AdminOffreController extends Controller
 {
+    public function __construct(private readonly AdminJournalService $journal) {}
+
     public function index()
     {
         return AdminOffreResource::collection(
@@ -28,12 +31,22 @@ class AdminOffreController extends Controller
             return $offre;
         });
 
+        $this->journal->enregistrer(
+            request()->user()->id,
+            'creation_offre',
+            'offres',
+            $offre->id,
+            null,
+            ['nom' => $offre->nom, 'prix_mensuel' => $offre->prix_mensuel]
+        );
+
         return new AdminOffreResource($offre->load(['fonctionnalites', 'limites']));
     }
 
     public function update(AdminOffreRequest $request, string $id)
     {
         $offre = Offre::findOrFail($id);
+        $ancienneValeur = ['nom' => $offre->nom, 'prix_mensuel' => $offre->prix_mensuel];
         $data = $request->validated();
 
         DB::transaction(function () use ($offre, $data) {
@@ -41,18 +54,38 @@ class AdminOffreController extends Controller
             $this->synchroniserRelations($offre, $data);
         });
 
+        $offre->refresh();
+        $this->journal->enregistrer(
+            request()->user()->id,
+            'modification_offre',
+            'offres',
+            $id,
+            $ancienneValeur,
+            ['nom' => $offre->nom, 'prix_mensuel' => $offre->prix_mensuel]
+        );
+
         return new AdminOffreResource($offre->fresh(['fonctionnalites', 'limites']));
     }
 
     public function destroy(string $id)
     {
         $offre = Offre::findOrFail($id);
+        $ancienneValeur = ['nom' => $offre->nom];
+
         $offre->delete();
+
+        $this->journal->enregistrer(
+            request()->user()->id,
+            'suppression_offre',
+            'offres',
+            $id,
+            $ancienneValeur,
+            null
+        );
+
         return response()->json(null, 204);
     }
 
-    /** Les fonctionnalités sont de simples libellés côté frontend (pas un
-     *  catalogue figé) — on les retrouve ou crée par leur nom. */
     private function synchroniserRelations(Offre $offre, array $data): void
     {
         $fonctionnaliteIds = collect($data['fonctionnalites'] ?? [])->map(
