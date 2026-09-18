@@ -1,0 +1,71 @@
+name: CI Backend MenuQr
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+jobs:
+  backend-tests:
+    name: Tests backend (Pest)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: menuqr
+          POSTGRES_PASSWORD: menuqr
+          POSTGRES_DB: menuqr_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Récupère le code
+        uses: actions/checkout@v4
+
+      - name: Installe PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_pgsql, mbstring, bcmath, intl, gd
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: composer-${{ hashFiles('composer.lock') }}
+
+      - name: Installe les dépendances PHP
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Prépare le fichier .env de test
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Attend que PostgreSQL soit prêt
+        run: |
+          until pg_isready -h 127.0.0.1 -p 5432 -U menuqr; do sleep 1; done
+
+      - name: Lance les migrations et les tests
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: menuqr_test
+          DB_USERNAME: menuqr
+          DB_PASSWORD: menuqr
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: array
+        run: |
+          php artisan migrate --force
+          php artisan test --env=testing
