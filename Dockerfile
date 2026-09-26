@@ -15,7 +15,6 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction
 
 # Render fournit le port via la variable $PORT — jamais un port fixe.
 EXPOSE 10000
-CMD php artisan migrate --force && \
-    php artisan config:cache && \
+CMD php artisan config:cache && \
     php artisan route:cache && \
     php artisan serve --host=0.0.0.0 --port=${PORT:-10000}
