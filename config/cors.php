@@ -9,8 +9,7 @@ return [
     // Ajoute ici tout autre port/domaine utilisé pour servir le frontend
     // (ex. l'IP locale si tu testes depuis un téléphone sur le même Wi-Fi).
     'allowed_origins' => [
-        'http://localhost:4200',
-        'http://127.0.0.1:4200',
+        'https://menuteranga-drab.vercel.app',
     ],
 
     'allowed_origins_patterns' => [],
