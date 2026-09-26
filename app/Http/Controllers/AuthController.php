@@ -247,7 +247,7 @@ class AuthController extends Controller
 
         $lienReinitialisation = config('app.frontend_url').'/reinitialisation?email='.urlencode($email).'&token='.$token;
 
-        \Illuminate\Support\Facades\Mail::to($email)->send(new \App\Mail\MotDePasseOublieMail($lienReinitialisation));
+        \Illuminate\Support\Facades\Mail::to($email)->queue(new \App\Mail\MotDePasseOublieMail($lienReinitialisation));
 
         return response()->json(['message' => 'Si un compte existe avec cet email, un lien a été envoyé.']);
     }
@@ -327,6 +327,6 @@ class AuthController extends Controller
 
         $lien = config('app.frontend_url').'/verification-email?email='.urlencode($email).'&token='.$token;
 
-        \Illuminate\Support\Facades\Mail::to($email)->send(new \App\Mail\VerificationEmailMail($lien));
+        \Illuminate\Support\Facades\Mail::to($email)->queue(new \App\Mail\VerificationEmailMail($lien));
     }
 }

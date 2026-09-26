@@ -174,7 +174,7 @@ class EmployeController extends Controller
     {
         $lien = config('app.frontend_url')."/invitations/{$employe->id}";
 
-        Mail::to($utilisateur->email)->send(new InvitationEmployeMail(
+        Mail::to($utilisateur->email)->queue(new InvitationEmployeMail(
             $utilisateur->nom_complet,
             $this->tenant->restaurant->nom,
             $role->nom,

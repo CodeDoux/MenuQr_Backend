@@ -24,6 +24,7 @@ use App\Models\TableRestaurant;
 use App\Models\Variante;
 use App\Models\Visite;
 use Illuminate\Support\Facades\DB;
+use App\Services\PaydunyaService;
 
 /**
  * ⚠️ Routes publiques. Le restaurant/table sont TOUJOURS résolus via le
@@ -228,45 +229,51 @@ class PublicCommandeController extends Controller
         ]);
     }
 
-    /** Paiement en ligne côté client (addition de visite OU commande directe). */
-    public function payer(string $commandeId)
-    {
-        $commande = Commande::withoutGlobalScope(RestaurantScope::class)->findOrFail($commandeId);
-        $methode = request()->validate(['methode' => ['required', 'in:WAVE,ORANGE_MONEY,CARTE']])['methode'];
+    /** Paiement en ligne côté client (addition de visite OU commande directe),
+ *  via PayDunya — le client choisit Wave/Orange Money/Carte SUR la page
+ *  PayDunya elle-même, pas chez nous. */
+public function payer(string $commandeId, PaydunyaService $paydunya)
+{
+    $commande = Commande::withoutGlobalScope(RestaurantScope::class)->findOrFail($commandeId);
 
-        $paiement = DB::transaction(function () use ($commande, $methode) {
-            if ($commande->visite_id) {
-                $addition = Addition::where('visite_id', $commande->visite_id)
-                    ->where('statut', StatutAddition::OUVERTE)->firstOrFail();
+    $montant = null;
+    $additionId = null;
 
-                $paiement = Paiement::create([
-                    'type' => TypePaiement::COMMANDE, 'addition_id' => $addition->id,
-                    'montant' => $addition->total, 'devise' => 'FCFA', 'methode' => $methode,
-                    'statut' => StatutPaiement::CONFIRME, 'date_paiement' => now(),
-                ]);
-                $addition->update(['statut' => StatutAddition::PAYEE]);
-                Facture::create([
-                    'numero' => 'FAC-'.now()->format('YmdHis'), 'addition_id' => $addition->id,
-                    'montant_ht' => $addition->total, 'taxe' => 0, 'montant_ttc' => $addition->total,
-                    'date_emission' => now(), 'statut' => StatutFacture::PAYEE,
-                ]);
-            } else {
-                $paiement = Paiement::create([
-                    'type' => TypePaiement::COMMANDE, 'commande_id' => $commande->id,
-                    'montant' => $commande->total, 'devise' => 'FCFA', 'methode' => $methode,
-                    'statut' => StatutPaiement::CONFIRME, 'date_paiement' => now(),
-                ]);
-                Facture::create([
-                    'numero' => 'FAC-'.now()->format('YmdHis'), 'commande_id' => $commande->id,
-                    'montant_ht' => $commande->total, 'taxe' => 0, 'montant_ttc' => $commande->total,
-                    'date_emission' => now(), 'statut' => StatutFacture::PAYEE,
-                ]);
-            }
-            return $paiement;
-        });
-
-        return response()->json(['message' => 'Paiement confirmé.', 'paiement_id' => $paiement->id]);
+    if ($commande->visite_id) {
+        $addition = Addition::where('visite_id', $commande->visite_id)
+            ->where('statut', StatutAddition::OUVERTE)->firstOrFail();
+        $montant = (float) $addition->total;
+        $additionId = $addition->id;
+    } else {
+        $montant = (float) $commande->total;
     }
+
+    $paiement = Paiement::create([
+        'type' => TypePaiement::COMMANDE,
+        'addition_id' => $additionId,
+        'commande_id' => $additionId ? null : $commande->id,
+        'montant' => $montant,
+        'devise' => 'FCFA',
+        'methode' => 'AUTRE', // ⚠️ inconnu tant que le client n'a pas choisi sur PayDunya
+        'statut' => StatutPaiement::EN_ATTENTE,
+    ]);
+
+    try {
+        $resultat = $paydunya->creerFacture(
+            $montant,
+            "Commande MenuQr #".strtoupper(substr($commande->id, -4)),
+            config('app.frontend_url')."/m/{$commande->restaurant_id}/suivi/{$commande->id}?paiement=retour",
+            config('app.url').'/api/public/paydunya/webhook'
+        );
+    } catch (\RuntimeException $e) {
+        $paiement->update(['statut' => StatutPaiement::ECHOUE]);
+        return response()->json(['message' => $e->getMessage()], 422);
+    }
+
+    $paiement->update(['reference' => $resultat['token']]);
+
+    return response()->json(['url_paiement' => $resultat['url']]);
+}
 
     /**
      * ⚠️ CORRIGÉ — l'ancienne version resommait TOUTES les commandes de la

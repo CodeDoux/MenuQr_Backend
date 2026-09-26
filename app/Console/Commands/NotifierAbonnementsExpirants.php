@@ -66,7 +66,7 @@ class NotifierAbonnementsExpirants extends Command
 
         if ($proprietaire) {
             Mail::to($proprietaire->utilisateur->email)
-                ->send(new AbonnementExpirationProcheMail($abonnement));
+                ->queue(new AbonnementExpirationProcheMail($abonnement));
         }
     }
 }

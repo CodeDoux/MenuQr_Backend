@@ -29,7 +29,7 @@ test('flux complet : demande de réinitialisation puis changement effectif du mo
     $this->postJson('/api/auth/mot-de-passe-oublie', ['email' => 'oubli@test.com'])->assertOk();
 
     $lienCapture = null;
-    \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\MotDePasseOublieMail::class, function ($mail) use (&$lienCapture) {
+    \Illuminate\Support\Facades\Mail::assertQueued(\App\Mail\MotDePasseOublieMail::class, function ($mail) use (&$lienCapture) {
         $lienCapture = $mail->lienReinitialisation;
         return true;
     });
