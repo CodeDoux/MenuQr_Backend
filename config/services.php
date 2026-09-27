@@ -42,4 +42,7 @@ return [
         'mode' => env('PAYDUNYA_MODE', 'sandbox'),
     ],
 
+    'brevo' => [
+    'key' => env('BREVO_API_KEY'),
+    ],
 ];

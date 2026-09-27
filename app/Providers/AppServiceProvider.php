@@ -51,6 +51,16 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+
+        Mail::extend('brevo', function () {
+            return (new BrevoTransportFactory)->create(
+                new Dsn(
+                    'brevo+api',
+                    'default',
+                    config('services.brevo.key')
+                )
+            );
+        });
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
 
         Gate::policy(Menu::class, MenuPolicy::class);
