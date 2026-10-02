@@ -7,7 +7,6 @@ use App\Http\Requests\TableRequest;
 use App\Http\Resources\TableResource;
 use App\Models\Salle;
 use App\Models\TableRestaurant;
-use App\Models\QRCode;
 use Illuminate\Support\Facades\Gate;
 
 /** ⚠️ Resolution manuelle de Salle ; TableRestaurant toujours via $salle->tables(). */
@@ -71,13 +70,6 @@ class TableController extends Controller
             \App\Models\Visite::where('table_id', $table->id)
                 ->where('statut', 'EN_COURS')
                 ->update(['statut' => 'TERMINEE', 'date_fin' => now()]);
-
-            // 3. Désactiver le QR actif de la table
-            QRCode::where('table_id', $table->id)
-                ->where('est_actif', true)
-                ->update([
-                    'est_actif' => false
-                ]);
         });
 
         return new TableResource($table->fresh());
