@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\StatutAbonnement;
 use App\Enums\StatutAcces;
 use App\Enums\StatutUtilisateur;
+use App\Enums\StatutRestaurant;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
@@ -125,6 +126,9 @@ class AuthController extends Controller
         $accesActifs = RestaurantUtilisateur::with(['restaurant', 'role'])
             ->where('utilisateur_id', $user->id)
             ->where('statut', StatutAcces::ACTIF)
+            ->whereHas('restaurant', function ($query) {
+                $query->where('statut', StatutRestaurant::ACTIF);
+            })
             ->get();
 
         if ($accesActifs->isEmpty()) {
@@ -173,6 +177,9 @@ class AuthController extends Controller
         $acces = RestaurantUtilisateur::where('utilisateur_id', $user->id)
             ->where('restaurant_id', $request->validated('restaurant_id'))
             ->where('statut', StatutAcces::ACTIF)
+            ->whereHas('restaurant', function ($query) {
+                $query->where('statut', StatutRestaurant::ACTIF);
+            })
             ->with(['restaurant', 'role.permissions'])
             ->first();
 
