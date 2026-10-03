@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Enums\StatutAcces;
 use App\Enums\StatutUtilisateur;
+use App\Enums\StatutRestaurant;
 use App\Models\RestaurantUtilisateur;
 use App\Services\TenantContext;
 use Closure;
