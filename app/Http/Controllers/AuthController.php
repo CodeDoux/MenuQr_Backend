@@ -126,9 +126,6 @@ class AuthController extends Controller
         $accesActifs = RestaurantUtilisateur::with(['restaurant', 'role'])
             ->where('utilisateur_id', $user->id)
             ->where('statut', StatutAcces::ACTIF)
-            ->whereHas('restaurant', function ($query) {
-                $query->where('statut', StatutRestaurant::ACTIF);
-            })
             ->get();
 
         if ($accesActifs->isEmpty()) {
@@ -138,19 +135,37 @@ class AuthController extends Controller
         }
 
         if ($accesActifs->count() === 1) {
-            $acces = $accesActifs->first();
-            $acces->load('role.permissions');
-            $token = $user->createToken('auth');
-            $token->accessToken->forceFill(['restaurant_id' => $acces->restaurant_id])->save();
+        $acces = $accesActifs->first();
 
-            return response()->json([
-                'token' => $token->plainTextToken,
-                'user' => new UserResource($user),
-                'restaurant' => new RestaurantResource($acces->restaurant),
-                'role' => $acces->role->code,
-                'permissions' => $acces->role->permissions->pluck('code'),
+        if ($acces->restaurant->statut !== StatutRestaurant::ACTIF) {
+            throw ValidationException::withMessages([
+                'email' => [
+                    match ($acces->restaurant->statut) {
+                        StatutRestaurant::SUSPENDU => 'Ce restaurant a été suspendu.',
+                        StatutRestaurant::FERME => 'Ce restaurant est actuellement fermé.',
+                        StatutRestaurant::INACTIF => 'Ce restaurant est actuellement inactif.',
+                        default => 'Ce restaurant n’est actuellement pas disponible.',
+                    }
+                ],
             ]);
         }
+
+        $acces->load('role.permissions');
+
+        $token = $user->createToken('auth');
+
+        $token->accessToken->forceFill([
+            'restaurant_id' => $acces->restaurant_id
+        ])->save();
+
+        return response()->json([
+            'token' => $token->plainTextToken,
+            'user' => new UserResource($user),
+            'restaurant' => new RestaurantResource($acces->restaurant),
+            'role' => $acces->role->code,
+            'permissions' => $acces->role->permissions->pluck('code'),
+        ]);
+    }
 
         $preAuthToken = $user->createToken('pre-auth', ['select-restaurant'], now()->addMinutes(5));
 
@@ -177,9 +192,6 @@ class AuthController extends Controller
         $acces = RestaurantUtilisateur::where('utilisateur_id', $user->id)
             ->where('restaurant_id', $request->validated('restaurant_id'))
             ->where('statut', StatutAcces::ACTIF)
-            ->whereHas('restaurant', function ($query) {
-                $query->where('statut', StatutRestaurant::ACTIF);
-            })
             ->with(['restaurant', 'role.permissions'])
             ->first();
 
@@ -187,6 +199,19 @@ class AuthController extends Controller
             return response()->json([
                 'message' => 'Accès non autorisé à ce restaurant.',
                 'code' => 'FORBIDDEN_RESTAURANT',
+            ], 403);
+        }
+        
+        if ($acces->restaurant->statut !== StatutRestaurant::ACTIF) {
+            return response()->json([
+                'message' => match ($acces->restaurant->statut) {
+                    StatutRestaurant::SUSPENDU => 'Ce restaurant a été suspendu.',
+                    StatutRestaurant::FERME => 'Ce restaurant est actuellement fermé.',
+                    StatutRestaurant::INACTIF => 'Ce restaurant est actuellement inactif.',
+                    default => 'Ce restaurant n’est actuellement pas disponible.',
+                },
+                'code' => 'RESTAURANT_INACTIVE',
+                'restaurant_status' => $acces->restaurant->statut->value,
             ], 403);
         }
 
