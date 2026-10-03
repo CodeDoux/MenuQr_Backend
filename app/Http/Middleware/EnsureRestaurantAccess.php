@@ -22,7 +22,7 @@ class EnsureRestaurantAccess
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
-    $token = $user?->currentAccessToken();
+        $token = $user?->currentAccessToken();
     
         if (! $user || ! $token || empty($token->restaurant_id)) {
             return response()->json([
@@ -51,6 +51,17 @@ class EnsureRestaurantAccess
             return response()->json([
                 'message' => 'Votre accès à ce restaurant a été révoqué ou suspendu.',
                 'code' => 'ACCESS_REVOKED',
+            ], 403);
+        }
+
+        $restaurant = $acces->restaurant;
+
+        if (! $restaurant || $restaurant->statut !== StatutRestaurant::ACTIF) {
+            $token->delete();
+
+            return response()->json([
+                'message' => 'Ce restaurant n’est actuellement pas actif.',
+                'code' => 'RESTAURANT_INACTIVE',
             ], 403);
         }
 
