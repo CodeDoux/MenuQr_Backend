@@ -20,7 +20,9 @@ class CommandeController extends Controller
     ];
 
     public function __construct(private readonly JournalService $journal,
-    private AdditionService $additionService) {}
+    private AdditionService $additionService) {
+        $this->additionService = $additionService;
+    }
 
     public function index()
     {

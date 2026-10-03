@@ -36,7 +36,9 @@ use App\Services\AdditionService;
 class PublicCommandeController extends Controller
 {
 
-    public function __construct(private AdditionService $additionService) {}
+    public function __construct(private AdditionService $additionService) {
+        $this->additionService = $additionService;
+    }
 
     public function store(CreerCommandePubliqueRequest $request)
     {
