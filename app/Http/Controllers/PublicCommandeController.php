@@ -25,6 +25,7 @@ use App\Models\Variante;
 use App\Models\Visite;
 use Illuminate\Support\Facades\DB;
 use App\Services\PaydunyaService;
+use App\Services\AdditionService;
 
 /**
  * ⚠️ Routes publiques. Le restaurant/table sont TOUJOURS résolus via le
@@ -34,6 +35,9 @@ use App\Services\PaydunyaService;
  */
 class PublicCommandeController extends Controller
 {
+
+    public function __construct(private AdditionService $additionService) {}
+
     public function store(CreerCommandePubliqueRequest $request)
     {
         $data = $request->validated();
@@ -85,7 +89,7 @@ class PublicCommandeController extends Controller
             // entière (voir recalculerAddition()) — sinon une promo "montant
             // fixe" serait déduite plusieurs fois si la visite a plusieurs commandes.
             $remiseTotale = $data['mode'] !== 'SUR_PLACE'
-                ? $this->calculerRemisePromotions($qrCode->restaurant_id, $sousTotal, $lignes)
+                ? $this->additionService->calculerRemisePromotions($qrCode->restaurant_id, $sousTotal, $lignes)
                 : 0;
             $promotionUtilisee = $remiseTotale > 0;
 
@@ -173,7 +177,7 @@ class PublicCommandeController extends Controller
             if ($visiteId) {
                 // Sur place : la remise (s'il y en a une) est calculée ICI,
                 // pour l'addition entière — voir recalculerAddition().
-                $this->recalculerAddition($visiteId);
+                $this->additionService->recalculerAddition($visiteId);
             } elseif ($promotionUtilisee) {
                 // Emporter/Livraison : incrémente immédiatement, une fois par commande.
                 \App\Models\Promotion::withoutGlobalScope(RestaurantScope::class)
@@ -275,110 +279,9 @@ public function payer(string $commandeId, PaydunyaService $paydunya)
     return response()->json(['url_paiement' => $resultat['url']]);
 }
 
-    /**
-     * ⚠️ CORRIGÉ — l'ancienne version resommait TOUTES les commandes de la
-     * visite à chaque appel, y compris celles déjà couvertes par une
-     * addition précédente déjà payée (double-facturation). Chaque commande
-     * est maintenant explicitement rattachée à UNE addition précise
-     * (commandes.addition_id) dès qu'elle y est intégrée, et n'est plus
-     * jamais reprise dans le calcul d'une addition suivante.
-     *
-     * La remise des promotions est calculée ICI, pour l'ADDITION ENTIÈRE
-     * (toutes les commandes qui lui sont rattachées), jamais commande par
-     * commande — sinon une promo "montant fixe" serait déduite plusieurs
-     * fois si la visite contient plusieurs commandes.
-     */
-    private function recalculerAddition(string $visiteId): void
-    {
-        $addition = Addition::where('visite_id', $visiteId)->where('statut', StatutAddition::OUVERTE)->first();
-        $nouvelleAddition = !$addition;
+   
 
-        if (!$addition) {
-            $addition = Addition::create([
-                'visite_id' => $visiteId, 'sous_total' => 0, 'remise' => 0,
-                'taxe' => 0, 'total' => 0, 'statut' => StatutAddition::OUVERTE,
-            ]);
-        }
-
-        Commande::withoutGlobalScope(RestaurantScope::class)
-            ->where('visite_id', $visiteId)
-            ->where('statut', '!=', StatutCommande::ANNULEE)
-            ->whereNull('addition_id')
-            ->update(['addition_id' => $addition->id]);
-
-        $commandes = Commande::withoutGlobalScope(RestaurantScope::class)
-            ->where('addition_id', $addition->id)
-            ->with('lignes')->get();
-
-        $sousTotal = $commandes->flatMap->lignes->sum('sous_total');
-        $fraisLivraison = $commandes->sum('frais_livraison');
-
-        $lignesPourPromo = $commandes->flatMap->lignes->map(fn ($l) => [
-            'produit_id' => $l->produit_id, 'quantite' => $l->quantite, 'sous_total' => (float) $l->sous_total,
-        ])->all();
-
-        $restaurantId = $commandes->first()?->restaurant_id;
-        $remise = $restaurantId ? $this->calculerRemisePromotions($restaurantId, $sousTotal, $lignesPourPromo) : 0;
-        $total = $sousTotal + $fraisLivraison - $remise;
-
-        $addition->update(['sous_total' => $sousTotal, 'remise' => $remise, 'total' => $total]);
-
-        // Une seule fois par visite (à la création de l'addition), pas à chaque commande.
-        if ($nouvelleAddition && $remise > 0 && $restaurantId) {
-            \App\Models\Promotion::withoutGlobalScope(RestaurantScope::class)
-                ->where('restaurant_id', $restaurantId)
-                ->where('est_active', true)
-                ->increment('nombre_utilisations');
-        }
-    }
-
-    /**
-     * Calcule la remise totale des promotions éligibles pour un ensemble de
-     * lignes données. Réutilisée à la fois pour une commande standalone
-     * (Emporter/Livraison) et pour une addition entière (Sur place).
-     *
-     * @param array $lignes Tableau de ['produit_id' => ..., 'quantite' => ..., 'sous_total' => ...]
-     */
-    private function calculerRemisePromotions(string $restaurantId, float $sousTotal, array $lignes): float
-    {
-        $promotionsEligibles = \App\Models\Promotion::withoutGlobalScope(RestaurantScope::class)
-            ->where('restaurant_id', $restaurantId)
-            ->where('est_active', true)
-            ->where('date_debut', '<=', now())
-            ->where(function ($q) {
-                $q->whereNull('date_fin')->orWhere('date_fin', '>=', now());
-            })
-            ->where(function ($q) {
-                $q->whereNull('limite_utilisation')->orWhereColumn('nombre_utilisations', '<', 'limite_utilisation');
-            })
-            ->with(['produits' => fn ($q) => $q->withoutGlobalScope(RestaurantScope::class)])
-            ->get();
-
-        $remiseTotale = 0;
-
-        foreach ($promotionsEligibles as $promotion) {
-            $cible = $promotion->cible instanceof \BackedEnum ? $promotion->cible->value : $promotion->cible;
-            $typeReduction = $promotion->type_reduction instanceof \BackedEnum ? $promotion->type_reduction->value : $promotion->type_reduction;
-
-            if ($cible === 'PRODUIT') {
-                $produitIdsPromo = $promotion->produits->pluck('id')->all();
-                foreach ($lignes as $ligne) {
-                    if (in_array($ligne['produit_id'], $produitIdsPromo, true)) {
-                        $remiseTotale += $typeReduction === 'POURCENTAGE'
-                            ? $ligne['sous_total'] * ((float) $promotion->valeur / 100)
-                            : (float) $promotion->valeur * $ligne['quantite'];
-                    }
-                }
-            } else { // COMMANDE_ENTIERE
-                $remiseTotale += $typeReduction === 'POURCENTAGE'
-                    ? $sousTotal * ((float) $promotion->valeur / 100)
-                    : (float) $promotion->valeur;
-            }
-        }
-
-        return min($remiseTotale, $sousTotal);
-    }
-
+    
     /**
      * Notifie chaque membre du staff ayant la permission de faire avancer
      * une commande (Propriétaire, Gérant, Serveur, Cuisinier) qu'une

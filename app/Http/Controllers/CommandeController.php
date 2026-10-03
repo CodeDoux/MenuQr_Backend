@@ -10,6 +10,7 @@ use App\Models\Commande;
 use App\Services\JournalService;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Request as RequestFacade;
+use App\Services\AdditionService;
 
 class CommandeController extends Controller
 {
@@ -18,7 +19,8 @@ class CommandeController extends Controller
         StatutCommande::EN_PREPARATION, StatutCommande::PRETE,
     ];
 
-    public function __construct(private readonly JournalService $journal) {}
+    public function __construct(private readonly JournalService $journal,
+    private AdditionService $additionService) {}
 
     public function index()
     {
@@ -97,14 +99,22 @@ class CommandeController extends Controller
         Gate::authorize('annuler', $commande);
 
         $ancienStatut = $commande->statut;
+        $additionId = $commande->addition_id;
+        $visiteId = $commande->visite_id;
+
+        DB::transaction(function () use ($commande, $ancienStatut, $additionId, $visiteId) {
         $commande->update(['statut' => StatutCommande::ANNULEE]);
+
         $commande->historique()->create([
             'ancien_statut' => $ancienStatut, 'nouveau_statut' => StatutCommande::ANNULEE,
             'utilisateur_id' => auth()->id(), 'date' => now(),
         ]);
 
+        if ($visiteId && $additionId) {
+            $this->additionService->recalculerAddition($visiteId);
+        }
         $this->journal->enregistrer('changement_statut_commande', 'commandes', $commande->id, $ancienStatut->value, 'ANNULEE');
-
+         });
         return new CommandeResource($commande->fresh(['lignes.produit', 'table']));
     }
 }
