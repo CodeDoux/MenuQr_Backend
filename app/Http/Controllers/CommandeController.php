@@ -11,6 +11,7 @@ use App\Services\JournalService;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Request as RequestFacade;
 use App\Services\AdditionService;
+use Illuminate\Support\Facades\DB;
 
 class CommandeController extends Controller
 {
@@ -20,8 +21,7 @@ class CommandeController extends Controller
     ];
 
     public function __construct(private readonly JournalService $journal,
-    private AdditionService $additionService) {
-        $this->additionService = $additionService;
+    private readonly AdditionService $additionService) {
     }
 
     public function index()
